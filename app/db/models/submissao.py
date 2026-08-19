@@ -24,7 +24,7 @@ class Submissao(Base):
     )
     codigo_submetido: Mapped[str] = mapped_column(Text, nullable=False)
     data_submissao: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
     tentativa_numero: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     status: Mapped[str] = mapped_column(

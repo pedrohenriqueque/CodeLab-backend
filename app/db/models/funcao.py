@@ -34,7 +34,7 @@ class Funcao(Base):
     dicas: Mapped[list | None] = mapped_column(JSON, nullable=True)  # list de strings, até 3
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
     # Relacionamentos

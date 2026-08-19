@@ -1,4 +1,4 @@
-"""
+r"""
 seed.py — Popula o banco com dados mock realistas para o CodeLab.
 
 Como rodar:
@@ -185,7 +185,7 @@ async def seed_usuarios(session):
     ]
     session.add_all(usuarios)
     await session.commit()
-    print(f"   ✓ {len(usuarios)} usuários inseridos.\n")
+    print(f"   [ok] {len(usuarios)} usuarios inseridos.\n")
 
 
 async def seed_atividades(session):
@@ -228,7 +228,7 @@ async def seed_atividades(session):
     ]
     session.add_all(atividades)
     await session.commit()
-    print(f"   ✓ {len(atividades)} atividades inseridas.\n")
+    print(f"   [ok] {len(atividades)} atividades inseridas.\n")
 
 
 async def seed_funcoes(session):
@@ -319,7 +319,7 @@ async def seed_funcoes(session):
     ]
     session.add_all(funcoes)
     await session.commit()
-    print(f"   ✓ {len(funcoes)} funções inseridas.\n")
+    print(f"   [ok] {len(funcoes)} funcoes inseridas.\n")
 
 
 async def seed_casos_teste(session):
@@ -446,7 +446,7 @@ async def seed_casos_teste(session):
     ]
     session.add_all(casos)
     await session.commit()
-    print(f"   ✓ {len(casos)} casos de teste inseridos.\n")
+    print(f"   [ok] {len(casos)} casos de teste inseridos.\n")
 
 
 async def seed_submissoes(session):
@@ -592,7 +592,7 @@ async def seed_submissoes(session):
 
     session.add_all(submissoes)
     await session.commit()
-    print(f"   ✓ {len(submissoes)} submissões inseridas.\n")
+    print(f"   [ok] {len(submissoes)} submissoes inseridas.\n")
 
 
 async def main():
@@ -621,12 +621,12 @@ async def main():
     print("  Aluno 2   : joao.silva@aluno.universidade.br")
     print()
     print("UUIDs fixos:")
-    print(f"  prof       → {U_PROF}")
-    print(f"  pedro      → {U_PEDRO}")
-    print(f"  joao       → {U_JOAO}")
-    print(f"  atividade1 → {ATV_001}")
-    print(f"  atividade2 → {ATV_002}")
-    print(f"  atividade3 → {ATV_003}")
+    print(f"  prof       -> {U_PROF}")
+    print(f"  pedro      -> {U_PEDRO}")
+    print(f"  joao       -> {U_JOAO}")
+    print(f"  atividade1 -> {ATV_001}")
+    print(f"  atividade2 -> {ATV_002}")
+    print(f"  atividade3 -> {ATV_003}")
 
 
 if __name__ == "__main__":

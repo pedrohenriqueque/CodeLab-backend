@@ -22,8 +22,8 @@ class Atividade(Base):
     titulo: Mapped[str] = mapped_column(String(300), nullable=False)
     descricao: Mapped[str | None] = mapped_column(Text, nullable=True)
     pontuacao_maxima: Mapped[float] = mapped_column(Numeric(6, 2), nullable=False, default=100)
-    data_abertura: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    data_fechamento: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    data_abertura: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    data_fechamento: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(
         SAEnum("rascunho", "publicado", "fechado", name="status_atividade"),
         nullable=False,
@@ -39,7 +39,7 @@ class Atividade(Base):
     bloquear_paste: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
     # Relacionamentos

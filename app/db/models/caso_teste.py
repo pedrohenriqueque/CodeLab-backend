@@ -24,7 +24,7 @@ class CasoTeste(Base):
     descricao: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
     # Relacionamentos

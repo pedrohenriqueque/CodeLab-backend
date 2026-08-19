@@ -24,7 +24,7 @@ class Usuario(Base):
     senha_hash: Mapped[str] = mapped_column(String(256), nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
     # Relacionamentos
