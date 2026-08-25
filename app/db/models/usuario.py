@@ -17,6 +17,7 @@ class Usuario(Base):
     )
     nome: Mapped[str] = mapped_column(String(200), nullable=False)
     email: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    matricula: Mapped[str | None] = mapped_column(String(50), nullable=True, unique=True)
     tipo: Mapped[str] = mapped_column(
         SAEnum("professor", "aluno", name="tipo_usuario"),
         nullable=False,

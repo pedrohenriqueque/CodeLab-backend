@@ -15,7 +15,7 @@ from datetime import datetime, timezone, timedelta
 
 from sqlalchemy import text
 
-from app.db.session import engine, async_session, init_db
+from app.db.session import engine, async_session, init_db, Base
 from app.db.models.usuario import Usuario
 from app.db.models.atividade import Atividade
 from app.db.models.funcao import Funcao
@@ -165,6 +165,7 @@ async def seed_usuarios(session):
             uuid=U_PROF,
             nome="Ana Souza",
             email="ana.souza@universidade.br",
+            matricula=None,
             tipo="professor",
             senha_hash=FAKE_HASH,
         ),
@@ -172,6 +173,7 @@ async def seed_usuarios(session):
             uuid=U_PEDRO,
             nome="Pedro Lacerda",
             email="pedro.lacerda@aluno.universidade.br",
+            matricula="20231001",
             tipo="aluno",
             senha_hash=FAKE_HASH,
         ),
@@ -179,6 +181,7 @@ async def seed_usuarios(session):
             uuid=U_JOAO,
             nome="João Silva",
             email="joao.silva@aluno.universidade.br",
+            matricula="20231002",
             tipo="aluno",
             senha_hash=FAKE_HASH,
         ),
@@ -600,11 +603,14 @@ async def main():
     print("  CodeLab - Seed de dados mock")
     print("=" * 55 + "\n")
 
-    # Garante que as tabelas existem
-    await init_db()
+    # Recria todas as tabelas para sincronizar novas colunas
+    print("[*] Sincronizando tabelas com o banco de dados...")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(Base.metadata.create_all)
+    print("   [ok] Tabelas recriadas e sincronizadas com sucesso.\n")
 
     async with async_session() as session:
-        await limpar_banco(session)
         await seed_usuarios(session)
         await seed_atividades(session)
         await seed_funcoes(session)
