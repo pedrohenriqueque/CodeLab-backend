@@ -11,7 +11,7 @@ Rotas:
 """
 
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
@@ -31,7 +31,7 @@ router = APIRouter(prefix="/api/funcoes", tags=["Funções"])
 @router.post("", response_model=FuncaoResponse, status_code=201)
 async def criar_funcao(
     body: FuncaoCreate,
-    atividade_uuid: str | None = None,
+    atividade_uuid: str | None = Query(default=None, alias="atividadeUuid"),
     session: AsyncSession = Depends(get_db),
 ):
     """
@@ -79,7 +79,7 @@ async def criar_funcao(
 
 @router.get("", response_model=list[FuncaoResponse])
 async def listar_funcoes(
-    atividade_uuid: str | None = None,
+    atividade_uuid: str | None = Query(default=None, alias="atividadeUuid"),
     session: AsyncSession = Depends(get_db),
 ):
     """Lista funções, opcionalmente filtradas por atividade."""
@@ -110,6 +110,51 @@ async def detalhe_funcao(
         raise HTTPException(status_code=404, detail="Função não encontrada")
 
     return FuncaoDetailResponse.model_validate(funcao)
+
+
+@router.put("/{funcao_uuid}", response_model=FuncaoResponse)
+async def atualizar_funcao(
+    funcao_uuid: str,
+    body: FuncaoCreate,
+    session: AsyncSession = Depends(get_db),
+):
+    """Atualiza uma função existente."""
+    result = await session.execute(
+        select(Funcao).where(Funcao.uuid == funcao_uuid)
+    )
+    funcao = result.scalar_one_or_none()
+    if not funcao:
+        raise HTTPException(status_code=404, detail="Função não encontrada")
+
+    funcao.nome_funcao = body.nome_funcao
+    funcao.pontos = body.pontos
+    funcao.ordem = body.ordem
+    funcao.parametros = [p.model_dump() for p in body.parametros]
+    funcao.retorno = body.retorno.model_dump()
+    funcao.descricao = body.descricao
+    funcao.dificuldade = body.dificuldade
+
+    await session.flush()
+    await session.refresh(funcao)
+    return FuncaoResponse.model_validate(funcao)
+
+
+@router.delete("/{funcao_uuid}", status_code=204)
+async def remover_funcao(
+    funcao_uuid: str,
+    session: AsyncSession = Depends(get_db),
+):
+    """Remove uma função existente."""
+    result = await session.execute(
+        select(Funcao).where(Funcao.uuid == funcao_uuid)
+    )
+    funcao = result.scalar_one_or_none()
+    if not funcao:
+        raise HTTPException(status_code=404, detail="Função não encontrada")
+
+    await session.delete(funcao)
+    await session.flush()
+    return None
 
 
 # ---- CASOS DE TESTE ----

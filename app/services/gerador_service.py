@@ -43,7 +43,11 @@ def _c_literal(valor, tipo: str = "int") -> str:
     if isinstance(valor, int):
         return str(valor)
     if isinstance(valor, list):
-        elements = ", ".join(_c_literal(v) for v in valor)
+        elem_tipo = tipo[:-2] if tipo.endswith("[]") else "int"
+        elements = ", ".join(_c_literal(v, elem_tipo) for v in valor)
+        # Compound literal em C99: (tipo[]){elementos}
+        if tipo.endswith("[]"):
+            return f"({elem_tipo}[]){{{elements}}}"
         return f"{{{elements}}}"
     return str(valor)
 
