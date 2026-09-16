@@ -10,7 +10,7 @@ from app.db.session import Base
 
 
 class Atividade(Base):
-    """Tabela de atividades (listas de exercícios)."""
+    """Tabela de atividades (listas de exercícios ou provas)."""
     __tablename__ = "atividades"
 
     uuid: Mapped[str] = mapped_column(
@@ -44,10 +44,23 @@ class Atividade(Base):
 
     # Relacionamentos
     professor = relationship("Usuario", back_populates="atividades")
-    funcoes = relationship(
-        "Funcao", back_populates="atividade", lazy="selectin",
+    atividades_funcoes = relationship(
+        "AtividadeFuncao", back_populates="atividade", lazy="selectin",
+        cascade="all, delete-orphan", order_by="AtividadeFuncao.ordem"
+    )
+    submissoes = relationship(
+        "Submissao", back_populates="atividade", lazy="selectin",
         cascade="all, delete-orphan"
     )
+    entregas_atividades = relationship(
+        "EntregaAtividade", back_populates="atividade", lazy="selectin",
+        cascade="all, delete-orphan"
+    )
+
+    # Propriedade de conveniência para acessar funções associadas
+    @property
+    def funcoes(self):
+        return [af.funcao for af in self.atividades_funcoes]
 
     def __repr__(self):
         return f"<Atividade {self.titulo}>"

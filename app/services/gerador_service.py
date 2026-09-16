@@ -128,7 +128,12 @@ def gerar_programa_teste(
         output_raw = caso.get("output_esperado", {})
 
         if isinstance(output_raw, dict):
-            expected_val = output_raw.get("valor", output_raw)
+            if "valor" in output_raw:
+                expected_val = output_raw["valor"]
+            elif "retorno" in output_raw:
+                expected_val = output_raw["retorno"]
+            else:
+                expected_val = output_raw
         else:
             expected_val = output_raw
 

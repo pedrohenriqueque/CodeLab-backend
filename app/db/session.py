@@ -42,9 +42,10 @@ class Base(DeclarativeBase):
 
 
 async def init_db():
-    """Cria todas as tabelas no banco de dados."""
+    """Cria e migra todas as tabelas no banco de dados preservando dados."""
+    from app.db.migrador import run_migrations
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        await run_migrations(conn)
 
 
 async def get_session() -> AsyncSession:

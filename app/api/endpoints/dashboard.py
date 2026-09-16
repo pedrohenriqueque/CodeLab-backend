@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any
 
 from app.api.dependencies import get_db, get_current_user
-from app.db.models import Submissao, Atividade, Funcao, Usuario
+from app.db.models import Submissao, Atividade, Funcao, Usuario, AtividadeFuncao
 
 router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
 
@@ -23,7 +23,9 @@ async def get_dashboard_aluno(
     # ── Atividades publicadas com funções ──────────────────────────────────
     result_atividades = await session.execute(
         select(Atividade)
-        .options(selectinload(Atividade.funcoes))
+        .options(
+            selectinload(Atividade.atividades_funcoes).selectinload(AtividadeFuncao.funcao)
+        )
         .where(Atividade.status == "publicado")
         .order_by(Atividade.data_fechamento.asc().nulls_last())
     )
@@ -65,16 +67,17 @@ async def get_dashboard_aluno(
             if df < agora:
                 continue  # já encerrada
 
-        total_funcoes = len(atv.funcoes)
-        total_pontos = sum(float(f.pontos or 0) for f in atv.funcoes)
+        total_funcoes = len(atv.atividades_funcoes)
+        total_pontos = sum(float(af.peso or 10.0) for af in atv.atividades_funcoes)
 
         pontos_obtidos = 0.0
         funcoes_completas = 0
-        for f in atv.funcoes:
-            prog = progresso_por_funcao.get(f.uuid)
+        for af in atv.atividades_funcoes:
+            prog = progresso_por_funcao.get(af.funcao_uuid)
+            peso_af = float(af.peso or 10.0)
             if prog:
                 pontos_obtidos += prog["melhor_nota"]
-                if prog["melhor_nota"] >= float(f.pontos or 0):
+                if prog["melhor_nota"] >= peso_af:
                     funcoes_completas += 1
 
         dias_restantes = None
@@ -124,16 +127,30 @@ async def get_dashboard_aluno(
         )
         funcao = result_funcao.scalar_one_or_none()
         if funcao:
-            result_atv = await session.execute(
-                select(Atividade).where(Atividade.uuid == funcao.atividade_uuid)
-            )
-            atv_obj = result_atv.scalar_one_or_none()
+            atv_uuid = sub.atividade_uuid
+            atv_obj = None
+            peso_val = 10.0
+            if atv_uuid:
+                result_atv = await session.execute(
+                    select(Atividade).where(Atividade.uuid == atv_uuid)
+                )
+                atv_obj = result_atv.scalar_one_or_none()
+                result_af = await session.execute(
+                    select(AtividadeFuncao).where(
+                        AtividadeFuncao.atividade_uuid == atv_uuid,
+                        AtividadeFuncao.funcao_uuid == sub.funcao_uuid,
+                    )
+                )
+                af_match = result_af.scalar_one_or_none()
+                if af_match:
+                    peso_val = float(af_match.peso)
+
             ultimas_tentativas.append({
                 "uuid": sub.uuid,
                 "funcao_nome": funcao.nome_funcao,
                 "atividade_titulo": atv_obj.titulo if atv_obj else "—",
                 "nota": float(sub.nota) if sub.nota is not None else None,
-                "pontos_max": float(funcao.pontos) if funcao.pontos else 0.0,
+                "pontos_max": peso_val,
                 "status": sub.status,
                 "data": sub.data_submissao.isoformat(),
             })
@@ -165,7 +182,9 @@ async def get_estatisticas(
     # Buscar todas as atividades com funções e submissões
     result_atividades = await session.execute(
         select(Atividade)
-        .options(selectinload(Atividade.funcoes))
+        .options(
+            selectinload(Atividade.atividades_funcoes).selectinload(AtividadeFuncao.funcao)
+        )
         .order_by(Atividade.created_at.desc())
     )
     atividades = result_atividades.scalars().all()
@@ -197,18 +216,15 @@ async def get_estatisticas(
     # Atividades recentes (últimas 4) com detalhes
     atividades_recentes = []
     for atividade in atividades[:4]:
-        funcoes_uuids = [f.uuid for f in atividade.funcoes]
+        funcoes_uuids = [af.funcao_uuid for af in atividade.atividades_funcoes]
 
         # Total de submissões para esta atividade
-        if funcoes_uuids:
-            result_subs = await session.execute(
-                select(func.count(Submissao.uuid)).where(
-                    Submissao.funcao_uuid.in_(funcoes_uuids)
-                )
+        result_subs = await session.execute(
+            select(func.count(Submissao.uuid)).where(
+                Submissao.atividade_uuid == atividade.uuid
             )
-            total_submissoes_atv = result_subs.scalar() or 0
-        else:
-            total_submissoes_atv = 0
+        )
+        total_submissoes_atv = result_subs.scalar() or 0
 
         # Calcular dias até o fechamento
         dias_para_fechar = None

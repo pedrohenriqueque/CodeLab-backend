@@ -15,6 +15,16 @@ class CasoTesteCreate(BaseModel):
     descricao: str | None = None
 
 
+class CasoTesteUpdate(BaseModel):
+    """Request body para atualizar caso de teste."""
+    model_config = CAMEL_CONFIG
+
+    inputs: dict[str, Any] | None = None
+    output_esperado: dict[str, Any] | None = None
+    descricao: str | None = None
+    numero: int | None = None
+
+
 class CasoTesteResponse(BaseModel):
     """Response de caso de teste."""
     model_config = CAMEL_CONFIG

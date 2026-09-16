@@ -11,6 +11,7 @@ class SubmissaoCreate(BaseModel):
     model_config = CAMEL_CONFIG
 
     funcao_uuid: str
+    atividade_uuid: str | None = None
     codigo: str = Field(..., min_length=1)
 
 
@@ -47,12 +48,16 @@ class SubmissaoListResponse(BaseModel):
 
     uuid: str
     funcao_uuid: str
+    funcao_nome: str | None = None
+    atividade_uuid: str | None = None
+    atividade_titulo: str | None = None
     aluno_nome: str | None = None
     codigo_submetido: str | None = None
     data_submissao: datetime | None = None
     tentativa_numero: int
     status: str
     nota: float | None = None
+    pontos_total: float | None = None
     resultado_json: dict[str, Any] | None = None
     feedback_professor: str | None = None
 

@@ -31,6 +31,7 @@ class Usuario(Base):
     # Relacionamentos
     atividades = relationship("Atividade", back_populates="professor", lazy="selectin")
     submissoes = relationship("Submissao", back_populates="aluno", lazy="selectin")
+    entregas_atividades = relationship("EntregaAtividade", back_populates="aluno", lazy="selectin")
 
     def __repr__(self):
         return f"<Usuario {self.nome} ({self.tipo})>"

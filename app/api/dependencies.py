@@ -15,6 +15,8 @@ from app.db.models import Usuario
 get_db = get_session
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+oauth2_optional_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
+
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
@@ -42,4 +44,23 @@ async def get_current_user(
         raise credentials_exception
         
     return user
+
+
+async def get_optional_current_user(
+    token: str | None = Depends(oauth2_optional_scheme),
+    session: AsyncSession = Depends(get_db)
+) -> Usuario | None:
+    """Retorna o usuário atual se autenticado, ou None."""
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+        user_uuid: str = payload.get("sub")
+        if user_uuid is None:
+            return None
+        result = await session.execute(select(Usuario).where(Usuario.uuid == user_uuid))
+        return result.scalar_one_or_none()
+    except JWTError:
+        return None
+
 
