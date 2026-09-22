@@ -57,22 +57,22 @@ ATTEMPT_CASES = {
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Insere dados de demonstração no banco de desenvolvimento.")
-    parser.add_argument("--environment", required=True, choices=("development",))
+    parser = argparse.ArgumentParser(description="Insere dados de demonstração no banco configurado.")
+    parser.add_argument("--environment", required=True, choices=("development", "production"))
     parser.add_argument("--confirm", required=True)
     return parser.parse_args()
 
 
 def validate_seed_target(settings: Settings, environment: str, confirmation: str) -> None:
-    expected = "SEED:development:codelab_v2"
-    if environment != "development" or settings.environment != environment:
-        raise ValueError("O seed exige CODELAB_V2_ENVIRONMENT=development.")
+    if environment not in {"development", "production"} or settings.environment != environment:
+        raise ValueError("O ambiente informado deve corresponder a CODELAB_V2_ENVIRONMENT.")
+    expected = f"SEED:{environment}:codelab_v2"
     if confirmation != expected:
         raise ValueError(f"Confirmação inválida. Use --confirm {expected}")
 
 
 async def get_or_create_user(
-    session: AsyncSession, nome: str, email: str, matricula: str | None, perfil: PerfilUsuario
+    session: AsyncSession, nome: str, email: str, matricula: str | None, perfil: PerfilUsuario,
 ) -> Usuario:
     conditions = [Usuario.email == email]
     if matricula is not None:
@@ -231,8 +231,8 @@ async def ensure_demo_attempts(session: AsyncSession, atividade: Atividade, alun
 
 
 async def seed(settings: Settings) -> None:
-    if settings.environment != "development":
-        raise ValueError("O seed só pode ser executado em development.")
+    if settings.environment not in {"development", "production"}:
+        raise ValueError("O seed só pode ser executado em development ou production.")
     engine = make_engine(settings)
     try:
         factory = make_session_factory(engine)

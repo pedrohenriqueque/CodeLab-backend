@@ -22,11 +22,13 @@ class SeedTargetTests(unittest.TestCase):
     def test_requires_matching_development_environment_and_confirmation(self):
         settings = SimpleNamespace(environment="development")
         validate_seed_target(settings, "development", "SEED:development:codelab_v2")
+        validate_seed_target(SimpleNamespace(environment="production"), "production", "SEED:production:codelab_v2")
         for configured, requested, confirmation in (
             ("production", "development", "SEED:development:codelab_v2"),
             ("test", "development", "SEED:development:codelab_v2"),
             ("development", "production", "SEED:development:codelab_v2"),
             ("development", "development", "wrong"),
+            ("production", "production", "SEED:development:codelab_v2"),
         ):
             with self.subTest(configured=configured, requested=requested, confirmation=confirmation):
                 with self.assertRaises(ValueError):
@@ -42,10 +44,10 @@ class SeedTargetTests(unittest.TestCase):
 
 
 class SeedDataTests(unittest.IsolatedAsyncioTestCase):
-    async def test_production_is_rejected_before_creating_an_engine(self):
+    async def test_test_environment_is_rejected_before_creating_an_engine(self):
         with patch("backend_v2.seed_demo.make_engine") as make_engine:
             with self.assertRaises(ValueError):
-                await seed(SimpleNamespace(environment="production"))
+                await seed(SimpleNamespace(environment="test"))
         make_engine.assert_not_called()
 
     async def test_existing_user_conflict_is_rejected_without_write(self):
