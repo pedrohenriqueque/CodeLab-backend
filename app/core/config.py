@@ -70,8 +70,8 @@ class Settings(BaseSettings):
 
         if url.drivername != "postgresql+asyncpg" or not url.host or not url.username:
             raise ValueError("Use PostgreSQL com asyncpg, host e usuário explícitos.")
-        if url.database not in {"codelab_v2", "codelab_v2_test"}:
-            raise ValueError("O banco deve ser codelab_v2 ou codelab_v2_test.")
+        if url.database not in {"codelab_v2", "codelab_v2_prod", "codelab_v2_test"}:
+            raise ValueError("O banco deve ser codelab_v2, codelab_v2_prod ou codelab_v2_test.")
         overrides = {"database", "dbname", "host", "port", "user", "password", "dsn"}
         if overrides.intersection(key.lower() for key in url.query):
             raise ValueError("A query da URL não pode substituir a identidade do banco.")
@@ -94,8 +94,12 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_database_environment(self) -> "Settings":
         database = make_url(self.database_url.get_secret_value()).database
-        expected = "codelab_v2_test" if self.environment == "test" else "codelab_v2"
-        if database != expected:
+        permitted = {
+            "development": {"codelab_v2"},
+            "test": {"codelab_v2_test"},
+            "production": {"codelab_v2", "codelab_v2_prod"},
+        }
+        if database not in permitted[self.environment]:
             raise ValueError("O nome do banco não corresponde ao ambiente selecionado.")
         return self
 

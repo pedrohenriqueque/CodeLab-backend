@@ -89,10 +89,11 @@ async def criar_tentativa(
         "ERRO_COMPILACAO" if resultado.compilation_error else "AVALIADA"
     )
     tentativa.total_casos = resultado.total_cases
-    tentativa.casos_aprovados = resultado.passed_cases
     if not resultado.technical_failure:
-        tentativa.nota = calcular_nota(funcao.nota_maxima, resultado.passed_cases, resultado.total_cases)
-        resultados_por_caso = resultado.case_results or tuple(False for _ in casos)
+        resultados_por_caso = tuple(resultado.case_results[:len(casos)])
+        resultados_por_caso += tuple(False for _ in range(len(casos) - len(resultados_por_caso)))
+        tentativa.casos_aprovados = sum(resultados_por_caso)
+        tentativa.nota = calcular_nota_ponderada(funcao.nota_maxima, casos, resultados_por_caso)
         await SubmissionRepository(db).add_case_results([
             ResultadoCasoTentativa(
                 tentativa_uuid=tentativa.uuid,
@@ -107,20 +108,49 @@ async def criar_tentativa(
     return tentativa
 
 
-def calcular_nota(nota_maxima: Decimal, casos_aprovados: int, total_casos: int) -> Decimal:
-    """Calcula exclusivamente no backend a nota proporcional aprovada na DEC-02."""
-    if total_casos <= 0:
-        raise ValueError("Uma função avaliada precisa ter casos de teste.")
-    nota = Decimal(nota_maxima) * Decimal(casos_aprovados) / Decimal(total_casos)
+def calcular_nota(nota_maxima: Decimal, peso_aprovado: Decimal, peso_total: Decimal) -> Decimal:
+    """Calcula no backend a nota proporcional à soma dos pesos aprovados."""
+    if peso_total <= 0:
+        raise ValueError("A soma dos pesos dos casos deve ser positiva.")
+    nota = Decimal(nota_maxima) * Decimal(peso_aprovado) / Decimal(peso_total)
     return nota.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
+def calcular_nota_ponderada(nota_maxima: Decimal, casos: list[Any], resultados: tuple[bool, ...]) -> Decimal:
+    """Aplica os pesos relativos dos casos aprovados sobre a nota máxima da função."""
+    if not casos or len(casos) != len(resultados):
+        raise ValueError("A avaliação precisa ter um resultado para cada caso de teste.")
+
+    pesos = [Decimal(getattr(caso, "peso", Decimal("1.00"))) for caso in casos]
+    peso_total = sum(pesos, Decimal("0"))
+    if peso_total <= 0:
+        raise ValueError("A soma dos pesos dos casos deve ser positiva.")
+
+    peso_aprovado = sum(
+        (peso for peso, aprovado in zip(pesos, resultados, strict=True) if aprovado),
+        Decimal("0"),
+    )
+    return calcular_nota(nota_maxima, peso_aprovado, peso_total)
+
+
 def resultado_liberado(atividade, agora: datetime | None = None) -> bool:
-    """Indica quando resultados podem ser exibidos ao aluno."""
-    if atividade.tipo != "PROVA" or atividade.status == "ENCERRADA":
+    """Indica quando resultados e notas podem ser exibidos ao aluno."""
+    if not atividade:
         return True
-    referencia = agora or datetime.now(timezone.utc)
-    return referencia >= atividade.fim_em
+    if getattr(atividade, "status", None) == "ENCERRADA":
+        return True
+    if getattr(atividade, "fim_em", None):
+        referencia = agora or datetime.now(timezone.utc)
+        fim_em_utc = (
+            atividade.fim_em
+            if atividade.fim_em.tzinfo
+            else atividade.fim_em.replace(tzinfo=timezone.utc)
+        )
+        if referencia >= fim_em_utc:
+            return True
+    if getattr(atividade, "tipo", None) != "PROVA":
+        return True
+    return False
 
 
 async def resposta_tentativa(
@@ -136,6 +166,11 @@ async def resposta_tentativa(
         melhor_nota = await SubmissionRepository(db).best_score(
             tentativa.funcao_atividade_uuid, tentativa.aluno_uuid
         )
+    nota = tentativa.nota
+    if liberar_resultado and nota is None and tentativa.status == "AVALIADA" and tentativa.total_casos and tentativa.total_casos > 0:
+        nota = (Decimal(tentativa.casos_aprovados) / Decimal(tentativa.total_casos)) * Decimal(nota_maxima)
+        nota = nota.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
     return {
         "uuid": tentativa.uuid,
         "funcao_atividade_uuid": tentativa.funcao_atividade_uuid,
@@ -145,7 +180,7 @@ async def resposta_tentativa(
         "total_casos": tentativa.total_casos if liberar_resultado else None,
         "casos_aprovados": tentativa.casos_aprovados if liberar_resultado else None,
         "falha_tecnica": tentativa.status == "FALHA_TECNICA",
-        "nota": tentativa.nota if liberar_resultado else None,
+        "nota": nota if liberar_resultado else None,
         "nota_maxima": nota_maxima,
         "melhor_nota_funcao": melhor_nota,
     }
@@ -179,16 +214,35 @@ async def consultar_tentativa(
 
     liberar = professor or resultado_liberado(atividade)
     data = {
-        "uuid": tentativa.uuid, "funcao_atividade_uuid": funcao.uuid,
-        "atividade_uuid": atividade.uuid, "atividade_titulo": atividade.titulo,
-        "funcao_nome": funcao.nome, "recebida_em": tentativa.recebida_em,
+        "uuid": tentativa.uuid,
+        "funcao_atividade_uuid": funcao.uuid,
+        "atividade_uuid": atividade.uuid,
+        "atividade_titulo": atividade.titulo,
+        "atividade_tipo": getattr(atividade, "tipo", None),
+        "funcao_nome": funcao.nome,
+        "recebida_em": tentativa.recebida_em,
+        "avaliada_em": getattr(tentativa, "avaliada_em", None),
         "status": tentativa.status if liberar else "ENVIO_REGISTRADO",
         "falha_tecnica": tentativa.status == "FALHA_TECNICA",
         "codigo_fonte": tentativa.codigo_fonte,
     }
     if liberar:
-        data.update({"nota": tentativa.nota, "nota_maxima": funcao.nota_maxima,
-                     "casos_aprovados": tentativa.casos_aprovados, "total_casos": tentativa.total_casos})
+        nota = tentativa.nota
+        if nota is None and tentativa.status == "AVALIADA" and tentativa.total_casos and tentativa.total_casos > 0:
+            nota = (Decimal(tentativa.casos_aprovados) / Decimal(tentativa.total_casos)) * Decimal(funcao.nota_maxima)
+            nota = nota.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        data.update({
+            "nota": nota,
+            "nota_maxima": funcao.nota_maxima,
+            "casos_aprovados": tentativa.casos_aprovados,
+            "total_casos": tentativa.total_casos,
+        })
+        resultados = {item.caso_teste_atividade_uuid: item.aprovado for item in await SubmissionRepository(db).list_case_results(tentativa.uuid)}
+        casos = await ActivityFunctionRepository(db).list_cases([funcao.uuid])
+        if professor:
+            data["resultados_casos"] = [{"casoTesteAtividadeUuid": caso.uuid, "aprovado": resultados.get(caso.uuid, False), "entradas": caso.entradas, "retornoEsperado": caso.retorno_esperado, "visibilidade": caso.visibilidade} for caso in casos]
+        else:
+            data["resultados_casos"] = [{"casoTesteAtividadeUuid": caso.uuid, "aprovado": resultados.get(caso.uuid, False), "entradas": caso.entradas, "retornoEsperado": caso.retorno_esperado, "visibilidade": caso.visibilidade} for caso in casos if getattr(caso, "visibilidade", "").upper() == "VISIVEL"]
     if professor:
         aluno = (
             alunos_por_uuid.get(tentativa.aluno_uuid)
@@ -197,9 +251,6 @@ async def consultar_tentativa(
         )
         data["aluno_nome"] = aluno.nome if aluno else None
         data["aluno_matricula"] = aluno.matricula if aluno else None
-        resultados = {item.caso_teste_atividade_uuid: item.aprovado for item in await SubmissionRepository(db).list_case_results(tentativa.uuid)}
-        casos = await ActivityFunctionRepository(db).list_cases([funcao.uuid])
-        data["resultados_casos"] = [{"casoTesteAtividadeUuid": caso.uuid, "aprovado": resultados.get(caso.uuid, False), "entradas": caso.entradas, "retornoEsperado": caso.retorno_esperado, "visibilidade": caso.visibilidade} for caso in casos]
     return data
 
 

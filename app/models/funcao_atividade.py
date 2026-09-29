@@ -36,3 +36,4 @@ class CasoTesteAtividade(Base):
     retorno_esperado: Mapped[object] = mapped_column(JSON, nullable=False)
     visibilidade: Mapped[str] = mapped_column(String(16), nullable=False)
     descricao: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    peso: Mapped[Decimal] = mapped_column(Numeric(8, 2), nullable=False, default=Decimal("1.00"))

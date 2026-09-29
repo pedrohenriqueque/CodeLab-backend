@@ -27,17 +27,53 @@ from .routes.activities import router as activities_router
 from .routes.submissions import router as submissions_router
 from .routes.progress import router as progress_router
 from .routes.sandbox import router as sandbox_router
+import asyncio
+from datetime import datetime, timezone
+from sqlalchemy import update
+from .models.atividade import Atividade
+from .config.database import dispose_db_engine, make_engine, make_session_factory
+
 from .routes.dashboard import router as dashboard_router
+
+async def job_fechar_atividades_expiradas(app: FastAPI):
+    """Job periódico em background que persiste o encerramento de atividades expiradas no banco."""
+    while True:
+        try:
+            await asyncio.sleep(60)
+            if app.state.session_factory is None:
+                if app.state.db_engine is None:
+                    app.state.db_engine = make_engine(app.state.settings)
+                app.state.session_factory = make_session_factory(app.state.db_engine)
+
+            async with app.state.session_factory() as session:
+                agora = datetime.now(timezone.utc)
+                stmt = (
+                    update(Atividade)
+                    .where(Atividade.status == "PUBLICADA", Atividade.fim_em <= agora)
+                    .values(status="ENCERRADA")
+                )
+                res = await session.execute(stmt)
+                if res.rowcount > 0:
+                    await session.commit()
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            pass
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Cria a aplicação sem conectar a banco, Judge0 ou executar DDL."""
     settings = settings if settings is not None else get_settings()
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        # Não criar engine nem executar migrations no startup.
+        bg_task = asyncio.create_task(job_fechar_atividades_expiradas(app))
         try:
             yield
         finally:
+            bg_task.cancel()
+            try:
+                await bg_task
+            except asyncio.CancelledError:
+                pass
             await dispose_db_engine(app)
 
     application = FastAPI(title="CodeLab API", version="2.0.0", lifespan=lifespan)

@@ -22,7 +22,7 @@ from .app.models.usuario import PerfilUsuario, Usuario
 
 DEMO_PASSWORD = "123456"
 USERS = (
-    ("Administrador CodeLab", "admin@codelab.local", None, PerfilUsuario.ADMIN),
+    ("Administrador CodeLab", "admin@codelab.com", None, PerfilUsuario.ADMIN),
     ("Ana Souza", "ana.souza@universidade.br", None, PerfilUsuario.PROFESSOR),
     ("Bruno Lima", "bruno.lima@universidade.br", None, PerfilUsuario.PROFESSOR),
     ("Pedro Lacerda", "pedro.lacerda@aluno.universidade.br", "ALU001", PerfilUsuario.ALUNO),
@@ -116,6 +116,7 @@ async def get_or_create_function(
     session: AsyncSession, professor: Usuario, nome: str, enunciado: str,
     retorno: str, parametros: list[dict[str, str]], dificuldade: str,
     casos: list[tuple[list[object], object, str]],
+    legacy: dict[str, object] | None = None,
 ) -> FuncaoBiblioteca:
     funcao = await session.scalar(select(FuncaoBiblioteca).where(
         FuncaoBiblioteca.professor_uuid == professor.uuid, FuncaoBiblioteca.nome == nome
@@ -128,7 +129,30 @@ async def get_or_create_function(
         session.add(funcao)
         await session.flush()
     elif funcao.tipo_retorno != retorno or funcao.parametros != parametros:
-        raise ValueError(f"Assinatura da função de demonstração em conflito: {nome}")
+        legacy_fields = ("tipo_retorno", "parametros", "enunciado", "dificuldade", "compartilhada")
+        if legacy is None or any(getattr(funcao, field) != legacy.get(field) for field in legacy_fields):
+            raise ValueError(f"Assinatura da função de demonstração em conflito: {nome}")
+
+        existing_cases = list(await session.scalars(select(CasoTeste).where(CasoTeste.funcao_uuid == funcao.uuid)))
+        remaining_cases = list(legacy.get("casos", []))
+        for existing_case in existing_cases:
+            matching_case = next((index for index, expected in enumerate(remaining_cases)
+                                  if expected[0] == existing_case.entradas
+                                  and expected[1] == existing_case.retorno_esperado
+                                  and expected[2] == existing_case.descricao), None)
+            if (matching_case is None or existing_case.visibilidade != "VISIVEL"
+                    or getattr(existing_case, "peso", Decimal("1.00")) != Decimal("1.00")):
+                raise ValueError(f"Dados da função de demonstração em conflito: {nome}")
+            remaining_cases.pop(matching_case)
+        if remaining_cases:
+            raise ValueError(f"Dados da função de demonstração em conflito: {nome}")
+
+        funcao.enunciado = enunciado
+        funcao.tipo_retorno = retorno
+        funcao.parametros = parametros
+        for existing_case in existing_cases:
+            await session.delete(existing_case)
+        await session.flush()
 
     existing = await session.scalar(select(CasoTeste.uuid).where(CasoTeste.funcao_uuid == funcao.uuid).limit(1))
     if existing is None:
@@ -264,9 +288,17 @@ async def seed(settings: Settings) -> None:
                 [([1, 2], 3, "Soma positiva"), ([-5, 8], 3, "Soma com negativo")],
             )
             maior = await get_or_create_function(
-                session, ana, "maiorElemento", "Retorne o maior elemento presente no vetor recebido.",
-                "int", [{"nome": "valores", "tipo": "int[]"}], "MEDIO",
-                [([[1, 4, 2]], 4, "Vetor misto"), ([[9]], 9, "Vetor unitário")],
+                session, ana, "maiorElemento", "Retorne o maior elemento do vetor recebido, considerando tamanho.",
+                "int", [{"nome": "valores", "tipo": "int[]"}, {"nome": "tamanho", "tipo": "int"}], "MEDIO",
+                [([[1, 4, 2], 3], 4, "Vetor misto"), ([[9], 1], 9, "Vetor unitário")],
+                legacy={
+                    "tipo_retorno": "int",
+                    "parametros": [{"nome": "valores", "tipo": "int[]"}],
+                    "enunciado": "Retorne o maior elemento presente no vetor recebido.",
+                    "dificuldade": "MEDIO",
+                    "compartilhada": True,
+                    "casos": [([[1, 4, 2]], 4, "Vetor misto"), ([[9]], 9, "Vetor unitário")],
+                },
             )
             par = await get_or_create_function(
                 session, bruno, "ehPar", "Retorne true quando o número for par e false nos demais casos.",
@@ -279,20 +311,50 @@ async def seed(settings: Settings) -> None:
                 [([4], 8, "Positivo"), ([-3], -6, "Negativo")],
             )
             positivo = await get_or_create_function(
-                session, ana, "contarPositivos", "Conte os valores positivos de um vetor.",
-                "int", [{"nome": "valores", "tipo": "int[]"}], "MEDIO",
-                [([[1, -2, 3]], 2, "Mistos"), ([[-1, -4]], 0, "Nenhum positivo")],
+                session, ana, "contarPositivos", "Conte os valores positivos entre os primeiros tamanho itens.",
+                "int", [{"nome": "valores", "tipo": "int[]"}, {"nome": "tamanho", "tipo": "int"}], "MEDIO",
+                [([[1, -2, 3], 3], 2, "Mistos"), ([[-1, -4], 2], 0, "Nenhum positivo")],
+                legacy={
+                    "tipo_retorno": "int",
+                    "parametros": [{"nome": "valores", "tipo": "int[]"}],
+                    "enunciado": "Conte os valores positivos de um vetor.",
+                    "dificuldade": "MEDIO",
+                    "compartilhada": True,
+                    "casos": [([[1, -2, 3]], 2, "Mistos"), ([[-1, -4]], 0, "Nenhum positivo")],
+                },
             )
             media = await get_or_create_function(
                 session, carla, "mediaDois", "Calcule a média de dois valores reais.",
                 "double", [{"nome": "a", "tipo": "double"}, {"nome": "b", "tipo": "double"}], "FACIL",
                 [([2.0, 4.0], 3.0, "Média simples"), ([-2.0, 2.0], 0.0, "Média zero")],
             )
+            somaLongos = await get_or_create_function(
+                session, ana, "somarLongos", "Some dois valores do tipo long.",
+                "long", [{"nome": "a", "tipo": "long"}, {"nome": "b", "tipo": "long"}], "MEDIO",
+                [([5_000_000_000, 3], 5_000_000_003, "Valor acima de int"), ([-5, 8], 3, "Soma com negativo")],
+            )
+            dobrarFloat = await get_or_create_function(
+                session, ana, "dobrarFloat", "Retorne o dobro de um valor float.",
+                "float", [{"nome": "valor", "tipo": "float"}], "FACIL",
+                [([1.5], 3.0, "Decimal positivo"), ([-2.25], -4.5, "Decimal negativo")],
+            )
+            proximaLetra = await get_or_create_function(
+                session, ana, "proximaLetra", "Retorne o próximo caractere na tabela ASCII.",
+                "char", [{"nome": "letra", "tipo": "char"}], "FACIL",
+                [(["A"], "B", "Maiúscula"), (["y"], "z", "Minúscula")],
+            )
+            ecoTexto = await get_or_create_function(
+                session, ana, "ecoTexto", "Retorne o mesmo texto recebido.",
+                "string", [{"nome": "texto", "tipo": "string"}], "FACIL",
+                [(["CodeLab"], "CodeLab", "Texto comum"), (["C"], "C", "Texto curto")],
+            )
 
             basicas = await create_demo_activity(session, algoritmos, "Funções básicas", "Pratique funções, parâmetros e retornos.", [somar], "PUBLICADA")
             await create_demo_activity(session, algoritmos, "Vetores", "Atividade em rascunho para organização da turma.", [maior], "RASCUNHO")
             operacoes = await create_demo_activity(session, algoritmos, "Operações aritméticas", "Pratique retorno, comparação e composição de funções.", [somar, dobro], "PUBLICADA")
             await create_demo_activity(session, algoritmos, "Desafio de vetores", "Atividade encerrada para consulta de resultados.", [maior, positivo], "ENCERRADA")
+            await create_demo_activity(session, algoritmos, "Vetores com tamanho", "Pratique vetores C com o tamanho informado como parâmetro.", [maior, positivo], "PUBLICADA")
+            await create_demo_activity(session, algoritmos, "Tipos escalares C", "Valide retornos e parâmetros long, float, char e string.", [somaLongos, dobrarFloat, proximaLetra, ecoTexto], "PUBLICADA")
             await create_demo_activity(session, estruturas, "Revisão de condicionais", "Uma prova aberta para a turma de Estruturas de Dados.", [par], "PUBLICADA", "PROVA")
             fundamentos = await create_demo_activity(session, programacao, "Fundamentos de funções", "Exercício de média e retorno decimal.", [media], "PUBLICADA")
             for atividade, aluno in (

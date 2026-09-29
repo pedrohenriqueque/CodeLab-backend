@@ -60,7 +60,7 @@ async def _viewable_function(function_id: UUID, professor: Usuario, db: AsyncSes
 async def criar_caso(function_id: UUID, dados: CriarCasoTesteRequest, professor: Usuario, db: AsyncSession) -> CasoTeste:
     funcao = await _owned_function(function_id, professor, db)
     _validate_values(funcao, dados.entradas, dados.retorno_esperado)
-    caso = CasoTeste(funcao_uuid=funcao.uuid, entradas=dados.entradas, retorno_esperado=dados.retorno_esperado, visibilidade=dados.visibilidade, descricao=dados.descricao.strip())
+    caso = CasoTeste(funcao_uuid=funcao.uuid, entradas=dados.entradas, retorno_esperado=dados.retorno_esperado, visibilidade=dados.visibilidade, descricao=dados.descricao.strip(), peso=dados.peso)
     await TestCaseRepository(db).add(caso)
     await db.commit(); await db.refresh(caso)
     return caso
@@ -82,6 +82,7 @@ async def atualizar_caso(case_id: UUID, dados: AtualizarCasoTesteRequest, profes
     if dados.retorno_esperado is not None: caso.retorno_esperado = dados.retorno_esperado
     if dados.visibilidade is not None: caso.visibilidade = dados.visibilidade
     if dados.descricao is not None: caso.descricao = dados.descricao.strip()
+    if dados.peso is not None: caso.peso = dados.peso
     await db.commit(); await db.refresh(caso)
     return caso
 

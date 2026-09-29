@@ -1,6 +1,7 @@
 import uuid
+from decimal import Decimal
 
-from sqlalchemy import ForeignKey, JSON, String, Text
+from sqlalchemy import ForeignKey, JSON, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,3 +19,4 @@ class CasoTeste(Base):
     retorno_esperado: Mapped[object] = mapped_column(JSON, nullable=False)
     visibilidade: Mapped[str] = mapped_column(String(16), nullable=False)
     descricao: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    peso: Mapped[Decimal] = mapped_column(Numeric(8, 2), nullable=False, default=Decimal("1.00"))

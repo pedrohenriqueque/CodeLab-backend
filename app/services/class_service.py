@@ -201,5 +201,14 @@ async def consultar_resultados_turma(turma_id: UUID, professor: Usuario, db: Asy
     itens = []
     for atividade in atividades:
         notas = [nota for (atividade_uuid, _), nota in notas_atividade_aluno.items() if atividade_uuid == atividade.uuid]
-        itens.append({"atividade_uuid": atividade.uuid, "titulo": atividade.titulo, "enviados": sum(1 for chave in enviados if chave[0] == atividade.uuid), "total_alunos": len(alunos), "media_nota": media(notas), "aprovacao_percentual": aprovacao(notas, len(alunos))})
+        itens.append({
+            "atividade_uuid": atividade.uuid,
+            "titulo": atividade.titulo,
+            "tipo": atividade.tipo,
+            "fim_em": atividade.fim_em,
+            "enviados": sum(1 for chave in enviados if chave[0] == atividade.uuid),
+            "total_alunos": len(alunos),
+            "media_nota": media(notas),
+            "aprovacao_percentual": aprovacao(notas, len(alunos)),
+        })
     return {"media_geral": media(todas_notas), "aprovacao_percentual": aprovacao(todas_notas, len(alunos) * len(atividades)), "submissoes_avaliadas": avaliadas, "atividades": itens}

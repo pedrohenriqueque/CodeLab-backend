@@ -1,4 +1,5 @@
 from collections import defaultdict
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response, status
@@ -12,6 +13,7 @@ from ..schemas.atividade import AtividadeResponse, AtualizarAtividadeRequest, Cr
 from ..schemas.funcao import ParametroFuncao
 from ..schemas.funcao_atividade import (
     AssociarFuncaoAtividadeRequest,
+    AtualizarFuncaoAtividadeRequest,
     CasoTesteAtividadeResponse,
     FuncaoAtividadeResponse,
     ReordenarFuncoesAtividadeRequest,
@@ -19,11 +21,13 @@ from ..schemas.funcao_atividade import (
 from ..services.activity_service import (
     associar_funcao,
     atualizar_atividade,
+    atualizar_funcao_interna,
     criar_atividade,
     listar_atividades,
     listar_funcoes_internas,
     obter_atividade,
     publicar_atividade,
+    remover_atividade,
     remover_funcao_interna,
     reordenar_funcoes_internas,
     encerrar_atividade,
@@ -33,6 +37,13 @@ router = APIRouter(prefix="/atividades", tags=["Atividades"])
 
 
 def out(atividade: Atividade) -> AtividadeResponse:
+    agora = datetime.now(timezone.utc)
+    status_efetivo = atividade.status
+    if atividade.status == "PUBLICADA" and atividade.fim_em:
+        fim_em_utc = atividade.fim_em if atividade.fim_em.tzinfo else atividade.fim_em.replace(tzinfo=timezone.utc)
+        if agora >= fim_em_utc:
+            status_efetivo = "ENCERRADA"
+
     return AtividadeResponse(
         uuid=atividade.uuid,
         turma_uuid=atividade.turma_uuid,
@@ -40,7 +51,7 @@ def out(atividade: Atividade) -> AtividadeResponse:
         descricao=atividade.descricao,
         inicio_em=atividade.inicio_em,
         fim_em=atividade.fim_em,
-        status=atividade.status,
+        status=status_efetivo,
         tipo=atividade.tipo,
         permitir_multiplas_submissoes=atividade.permitir_multiplas_submissoes,
         max_tentativas_por_funcao=atividade.max_tentativas_por_funcao,
@@ -65,6 +76,7 @@ def function_out(funcao, casos) -> FuncaoAtividadeResponse:
                 retorno_esperado=caso.retorno_esperado,
                 visibilidade=caso.visibilidade,
                 descricao=caso.descricao,
+                peso=getattr(caso, "peso", 1),
             )
             for caso in casos
         ],
@@ -124,6 +136,16 @@ async def close_activity(
     return out(await encerrar_atividade(activity_id, professor, db))
 
 
+@router.delete("/{activity_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_activity(
+    activity_id: UUID,
+    professor: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    await remover_atividade(activity_id, professor, db)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post("/{activity_id}/funcoes", response_model=FuncaoAtividadeResponse, status_code=status.HTTP_201_CREATED)
 async def associate_function(
     activity_id: UUID,
@@ -138,6 +160,7 @@ async def associate_function(
 @router.get("/{activity_id}/funcoes", response_model=list[FuncaoAtividadeResponse])
 async def list_activity_functions(
     activity_id: UUID,
+    visiveis_apenas: bool = False,
     professor: Usuario = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[FuncaoAtividadeResponse]:
@@ -145,12 +168,21 @@ async def list_activity_functions(
     casos_por_funcao = defaultdict(list)
     for caso in casos:
         casos_por_funcao[caso.funcao_atividade_uuid].append(caso)
-    # Casos e valores esperados são exclusivos do processo de avaliação.
-    mostrar_casos = professor.perfil != "ALUNO"
+    def filtrar_casos_por_perfil(funcao_uuid: UUID) -> list:
+        todos = casos_por_funcao[funcao_uuid]
+        if professor.perfil != "ALUNO" and not visiveis_apenas:
+            return todos
+        # Aluno tem acesso apenas aos casos de teste com visibilidade pública/visível
+        return [
+            caso for caso in todos
+            if getattr(caso, "visibilidade", "").upper() == "VISIVEL"
+        ]
+
     return [
-        function_out(funcao, casos_por_funcao[funcao.uuid] if mostrar_casos else [])
+        function_out(funcao, filtrar_casos_por_perfil(funcao.uuid))
         for funcao in funcoes
     ]
+
 
 
 @router.put("/{activity_id}/funcoes/ordem", response_model=list[FuncaoAtividadeResponse])
@@ -166,6 +198,18 @@ async def reorder_activity_functions(
     for caso in casos:
         casos_por_funcao[caso.funcao_atividade_uuid].append(caso)
     return [function_out(funcao, casos_por_funcao[funcao.uuid]) for funcao in funcoes]
+
+
+@router.patch("/{activity_id}/funcoes/{activity_function_id}", response_model=FuncaoAtividadeResponse)
+async def update_activity_function(
+    activity_id: UUID,
+    activity_function_id: UUID,
+    dados: AtualizarFuncaoAtividadeRequest,
+    professor: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> FuncaoAtividadeResponse:
+    funcao, casos = await atualizar_funcao_interna(activity_id, activity_function_id, dados, professor, db)
+    return function_out(funcao, casos)
 
 
 @router.delete("/{activity_id}/funcoes/{activity_function_id}", status_code=status.HTTP_204_NO_CONTENT)

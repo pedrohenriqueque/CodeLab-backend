@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
 
@@ -13,6 +14,7 @@ class CriarCasoTesteRequest(ApiSchema):
     retorno_esperado: Any
     visibilidade: VisibilidadeCaso
     descricao: str = Field(default="", max_length=1000)
+    peso: Decimal = Field(default=Decimal("1.00"), gt=0, max_digits=8, decimal_places=2)
 
 
 class AtualizarCasoTesteRequest(ApiSchema):
@@ -20,6 +22,7 @@ class AtualizarCasoTesteRequest(ApiSchema):
     retorno_esperado: Any | None = None
     visibilidade: VisibilidadeCaso | None = None
     descricao: str | None = Field(default=None, max_length=1000)
+    peso: Decimal | None = Field(default=None, gt=0, max_digits=8, decimal_places=2)
 
 
 class CasoTesteResponse(ApiSchema):
@@ -28,3 +31,4 @@ class CasoTesteResponse(ApiSchema):
     retorno_esperado: Any
     visibilidade: VisibilidadeCaso
     descricao: str
+    peso: Decimal = Decimal("1.00")

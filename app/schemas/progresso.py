@@ -10,6 +10,7 @@ class ProgressoFuncaoResponse(ApiSchema):
     avaliada: bool
     aprovada: bool | None
     melhor_nota: Decimal | None
+    total_tentativas: int = 0
 
 
 class ProgressoAtividadeResponse(ApiSchema):

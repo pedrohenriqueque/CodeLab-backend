@@ -134,7 +134,7 @@ class DatabaseTests(unittest.TestCase):
         settings = fixture_settings()
         config = manage_db.migration_config(settings)
         script = ScriptDirectory.from_config(config)
-        self.assertEqual(script.get_current_head(), "c3e9a7d51201")
+        self.assertEqual(script.get_current_head(), "d4f1b7c92031")
         rendered = io.StringIO()
         with contextlib.redirect_stdout(rendered):
             command.upgrade(config, "head", sql=True)

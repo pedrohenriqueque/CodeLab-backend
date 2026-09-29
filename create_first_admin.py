@@ -48,7 +48,6 @@ async def create_first_admin(
             dados = CriarProfessorRequest(
                 nome=args.nome,
                 email=args.email,
-                matricula=args.matricula,
                 senha=password,
             )
             await criar_usuario(dados, PerfilUsuario.ADMIN, db)

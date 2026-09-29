@@ -1,6 +1,7 @@
 """Regressões do seed sem abrir conexão com o banco."""
 
 import unittest
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
@@ -8,9 +9,11 @@ from uuid import uuid4
 from backend_v2.seed_demo import (
     ATTEMPT_CASES,
     ATTEMPT_CODES,
+    USERS,
     create_demo_activity,
     ensure_demo_attempts,
     get_or_create_class,
+    get_or_create_function,
     get_or_create_user,
     seed,
     validate_seed_target,
@@ -19,6 +22,16 @@ from backend_v2.app.models.usuario import PerfilUsuario, Usuario
 
 
 class SeedTargetTests(unittest.TestCase):
+    def test_demo_admin_email_is_valid_for_api_response(self):
+        from backend_v2.app.schemas.usuario import UsuarioResponse
+
+        admin = next(user for user in USERS if user[3] == PerfilUsuario.ADMIN)
+        response = UsuarioResponse(
+            uuid=uuid4(), nome=admin[0], email=admin[1], matricula=admin[2],
+            perfil=admin[3].value, ativo=True,
+        )
+        self.assertEqual(response.email, "admin@codelab.com")
+
     def test_requires_matching_development_environment_and_confirmation(self):
         settings = SimpleNamespace(environment="development")
         validate_seed_target(settings, "development", "SEED:development:codelab_v2")
@@ -79,6 +92,90 @@ class SeedDataTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "conflito"):
             await get_or_create_class(session, owner, "Algoritmos", "ALG2026A")
         session.add.assert_not_called()
+
+    async def test_known_legacy_vector_function_is_upgraded_without_changing_snapshots(self):
+        professor = SimpleNamespace(uuid=uuid4())
+        function = SimpleNamespace(
+            uuid=uuid4(), professor_uuid=professor.uuid, nome="contarPositivos",
+            enunciado="Conte os valores positivos de um vetor.", tipo_retorno="int",
+            parametros=[{"nome": "valores", "tipo": "int[]"}], dificuldade="MEDIO", compartilhada=True,
+        )
+        old_cases = [
+            SimpleNamespace(entradas=[[1, -2, 3]], retorno_esperado=2, descricao="Mistos",
+                            visibilidade="VISIVEL", peso=Decimal("1.00")),
+            SimpleNamespace(entradas=[[-1, -4]], retorno_esperado=0, descricao="Nenhum positivo",
+                            visibilidade="VISIVEL", peso=Decimal("1.00")),
+        ]
+        session = Mock()
+        session.scalar = AsyncMock(side_effect=[function, None])
+        session.scalars = AsyncMock(return_value=old_cases)
+        session.delete = AsyncMock()
+        session.flush = AsyncMock()
+
+        updated = await get_or_create_function(
+            session,
+            professor,
+            "contarPositivos",
+            "Conte os valores positivos entre os primeiros tamanho itens.",
+            "int",
+            [{"nome": "valores", "tipo": "int[]"}, {"nome": "tamanho", "tipo": "int"}],
+            "MEDIO",
+            [([[1, -2, 3], 3], 2, "Mistos"), ([[-1, -4], 2], 0, "Nenhum positivo")],
+            legacy={
+                "tipo_retorno": "int",
+                "parametros": [{"nome": "valores", "tipo": "int[]"}],
+                "enunciado": "Conte os valores positivos de um vetor.",
+                "dificuldade": "MEDIO",
+                "compartilhada": True,
+                "casos": [([[1, -2, 3]], 2, "Mistos"), ([[-1, -4]], 0, "Nenhum positivo")],
+            },
+        )
+
+        self.assertIs(updated, function)
+        self.assertEqual(function.parametros, [{"nome": "valores", "tipo": "int[]"}, {"nome": "tamanho", "tipo": "int"}])
+        self.assertEqual(function.enunciado, "Conte os valores positivos entre os primeiros tamanho itens.")
+        self.assertEqual(session.delete.await_count, 2)
+        session.add_all.assert_called_once()
+        recreated_cases = list(session.add_all.call_args.args[0])
+        self.assertEqual([case.entradas for case in recreated_cases], [[ [1, -2, 3], 3 ], [[-1, -4], 2]])
+
+    async def test_legacy_demo_function_with_edited_cases_is_preserved_as_conflict(self):
+        professor = SimpleNamespace(uuid=uuid4())
+        function = SimpleNamespace(
+            uuid=uuid4(), professor_uuid=professor.uuid, nome="contarPositivos",
+            enunciado="Conte os valores positivos de um vetor.", tipo_retorno="int",
+            parametros=[{"nome": "valores", "tipo": "int[]"}], dificuldade="MEDIO", compartilhada=True,
+        )
+        edited_case = SimpleNamespace(entradas=[[1, -2, 3]], retorno_esperado=99, descricao="Editado",
+                                      visibilidade="VISIVEL", peso=Decimal("1.00"))
+        session = Mock()
+        session.scalar = AsyncMock(return_value=function)
+        session.scalars = AsyncMock(return_value=[edited_case])
+        session.delete = AsyncMock()
+
+        with self.assertRaisesRegex(ValueError, "Dados da função.*conflito"):
+            await get_or_create_function(
+                session,
+                professor,
+                "contarPositivos",
+                "Conte os valores positivos entre os primeiros tamanho itens.",
+                "int",
+                [{"nome": "valores", "tipo": "int[]"}, {"nome": "tamanho", "tipo": "int"}],
+                "MEDIO",
+                [([[1, -2, 3], 3], 2, "Mistos")],
+                legacy={
+                    "tipo_retorno": "int",
+                    "parametros": [{"nome": "valores", "tipo": "int[]"}],
+                    "enunciado": "Conte os valores positivos de um vetor.",
+                    "dificuldade": "MEDIO",
+                    "compartilhada": True,
+                    "casos": [([[1, -2, 3]], 2, "Mistos"), ([[-1, -4]], 0, "Nenhum positivo")],
+                },
+            )
+
+        self.assertEqual(function.parametros, [{"nome": "valores", "tipo": "int[]"}])
+        session.delete.assert_not_awaited()
+        session.add_all.assert_not_called()
 
     async def test_existing_activity_type_is_preserved(self):
         existing = SimpleNamespace(tipo="PROVA", status="ENCERRADA")

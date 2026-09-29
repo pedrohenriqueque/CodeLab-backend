@@ -228,6 +228,42 @@ class SubmissionServiceTests(unittest.TestCase):
             response = asyncio.run(list_activity_functions(self.activity.uuid, self.student, Mock()))
         self.assertEqual(response[0].casos_teste, [])
 
+    def test_student_function_projection_exposes_visible_test_cases(self):
+        snapshot = SimpleNamespace(
+            uuid=self.function.uuid,
+            nome="identidade",
+            enunciado="Retorne o valor recebido.",
+            tipo_retorno="int",
+            parametros=self.function.parametros,
+            dificuldade="FACIL",
+            nota_maxima=10,
+            ordem=1,
+        )
+        visible_case = SimpleNamespace(
+            uuid=uuid4(),
+            funcao_atividade_uuid=snapshot.uuid,
+            entradas=[7],
+            retorno_esperado=7,
+            visibilidade="VISIVEL",
+            descricao="Visível",
+            peso=1,
+        )
+        hidden_case = SimpleNamespace(
+            uuid=uuid4(),
+            funcao_atividade_uuid=snapshot.uuid,
+            entradas=[9],
+            retorno_esperado=9,
+            visibilidade="OCULTO",
+            descricao="Oculto",
+            peso=1,
+        )
+        with patch("backend_v2.app.routes.activities.listar_funcoes_internas", new=AsyncMock(return_value=([snapshot], [visible_case, hidden_case]))):
+            response = asyncio.run(list_activity_functions(self.activity.uuid, self.student, Mock()))
+        self.assertEqual(len(response[0].casos_teste), 1)
+        self.assertEqual(response[0].casos_teste[0].uuid, visible_case.uuid)
+        self.assertEqual(response[0].casos_teste[0].visibilidade, "VISIVEL")
+
+
 
 class SubmissionHistoryTests(unittest.TestCase):
     def setUp(self):

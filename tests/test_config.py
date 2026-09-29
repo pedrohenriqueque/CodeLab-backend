@@ -78,6 +78,15 @@ class SettingsTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             self.settings(environment="production", database_url=DATABASE_URL + "_test")
 
+    def test_production_accepts_separate_database_without_exposing_it_to_development(self):
+        production_url = DATABASE_URL + "_prod"
+        settings = self.settings(environment="production", database_url=production_url)
+        self.assertEqual(settings.database_url.get_secret_value(), production_url)
+        with self.assertRaises(ValidationError):
+            self.settings(database_url=production_url)
+        with self.assertRaises(ValidationError):
+            self.settings(environment="test", database_url=production_url)
+
     def test_invalid_environment_and_security_configuration_are_rejected(self):
         for values in (
             {"environment": "unknown"},

@@ -13,7 +13,11 @@ from ..repositories.class_repository import ClassRepository
 from ..repositories.enrollment_repository import EnrollmentRepository
 from ..repositories.test_case_repository import TestCaseRepository
 from ..schemas.atividade import AtualizarAtividadeRequest, CriarAtividadeRequest
-from ..schemas.funcao_atividade import AssociarFuncaoAtividadeRequest, ReordenarFuncoesAtividadeRequest
+from ..schemas.funcao_atividade import (
+    AssociarFuncaoAtividadeRequest,
+    AtualizarFuncaoAtividadeRequest,
+    ReordenarFuncoesAtividadeRequest,
+)
 from .function_service import obter_funcao
 
 async def _owned_class(class_id: UUID, professor: Usuario, db: AsyncSession):
@@ -44,6 +48,18 @@ async def criar_atividade(dados: CriarAtividadeRequest, professor: Usuario, db: 
     await ActivityRepository(db).add(atividade); await db.commit(); await db.refresh(atividade)
     return atividade
 
+def aplicar_status_efetivo(atividade: Atividade, agora: datetime | None = None) -> Atividade:
+    """Calcula e atualiza o status dinâmico da atividade com base no prazo de término."""
+    if not atividade:
+        return atividade
+    ref = agora or datetime.now(timezone.utc)
+    if atividade.status == "PUBLICADA" and atividade.fim_em:
+        fim_em_utc = atividade.fim_em if atividade.fim_em.tzinfo else atividade.fim_em.replace(tzinfo=timezone.utc)
+        if ref >= fim_em_utc:
+            atividade.status = "ENCERRADA"
+    return atividade
+
+
 async def listar_atividades(usuario: Usuario, db: AsyncSession) -> list[Atividade]:
     turmas = (
         await ClassRepository(db).list_by_professor(usuario.uuid)
@@ -55,23 +71,32 @@ async def listar_atividades(usuario: Usuario, db: AsyncSession) -> list[Atividad
     if turmas is None:
         raise CodelabException("Operação não permitida para este perfil.", 403)
     atividades = await ActivityRepository(db).list_by_class_ids([turma.uuid for turma in turmas])
-    return atividades if usuario.perfil == PerfilUsuario.PROFESSOR else [item for item in atividades if item.status != "RASCUNHO"]
+    lista = atividades if usuario.perfil == PerfilUsuario.PROFESSOR else [item for item in atividades if item.status != "RASCUNHO"]
+    for atv in lista:
+        aplicar_status_efetivo(atv)
+    return lista
+
 
 async def obter_atividade(activity_id: UUID, professor: Usuario, db: AsyncSession) -> Atividade:
-    return await _viewable_activity(activity_id, professor, db)
+    atv = await _viewable_activity(activity_id, professor, db)
+    return aplicar_status_efetivo(atv)
 
 async def atualizar_atividade(activity_id: UUID, dados: AtualizarAtividadeRequest, professor: Usuario, db: AsyncSession) -> Atividade:
     atividade = await obter_atividade(activity_id, professor, db)
-    if atividade.status != "RASCUNHO": raise CodelabException("Apenas rascunhos podem ser editados.", 409)
+    if atividade.status == "ENCERRADA":
+        raise CodelabException("Atividades encerradas não podem ser editadas.", 409)
+    if atividade.status == "PUBLICADA":
+        if dados.titulo is not None or dados.descricao is not None or dados.permitir_multiplas_submissoes is not None or dados.max_tentativas_por_funcao is not None or dados.mostrar_ocultos_apos_fechamento is not None:
+            raise CodelabException("Apenas o prazo de encerramento pode ser alterado em atividades publicadas.", 409)
     inicio = dados.inicio_em or atividade.inicio_em; fim = dados.fim_em or atividade.fim_em
     if inicio >= fim: raise CodelabException("A data inicial deve anteceder a final.", 422)
-    if dados.titulo is not None: atividade.titulo = dados.titulo.strip()
-    if dados.descricao is not None: atividade.descricao = dados.descricao.strip()
-    if dados.permitir_multiplas_submissoes is not None:
+    if dados.titulo is not None and atividade.status == "RASCUNHO": atividade.titulo = dados.titulo.strip()
+    if dados.descricao is not None and atividade.status == "RASCUNHO": atividade.descricao = dados.descricao.strip()
+    if dados.permitir_multiplas_submissoes is not None and atividade.status == "RASCUNHO":
         atividade.permitir_multiplas_submissoes = dados.permitir_multiplas_submissoes if atividade.tipo == "EXERCICIO" else False
-    if dados.max_tentativas_por_funcao is not None:
+    if dados.max_tentativas_por_funcao is not None and atividade.status == "RASCUNHO":
         atividade.max_tentativas_por_funcao = dados.max_tentativas_por_funcao
-    if dados.mostrar_ocultos_apos_fechamento is not None:
+    if dados.mostrar_ocultos_apos_fechamento is not None and atividade.status == "RASCUNHO":
         atividade.mostrar_ocultos_apos_fechamento = dados.mostrar_ocultos_apos_fechamento if atividade.tipo == "EXERCICIO" else False
     atividade.inicio_em, atividade.fim_em = inicio, fim
     await db.commit(); await db.refresh(atividade)
@@ -116,6 +141,7 @@ async def associar_funcao(
                 retorno_esperado=deepcopy(caso.retorno_esperado),
                 visibilidade=caso.visibilidade,
                 descricao=caso.descricao,
+                peso=getattr(caso, "peso", Decimal("1.00")),
             )
             for caso in casos_origem
         ]
@@ -150,6 +176,29 @@ async def remover_funcao_interna(
         raise NotFoundError("Função da atividade")
     await repository.delete_function(funcao)
     await db.commit()
+
+
+async def atualizar_funcao_interna(
+    activity_id: UUID,
+    activity_function_id: UUID,
+    dados: AtualizarFuncaoAtividadeRequest,
+    professor: Usuario,
+    db: AsyncSession,
+) -> tuple[FuncaoAtividade, list[CasoTesteAtividade]]:
+    atividade = await obter_atividade(activity_id, professor, db)
+    _require_draft(atividade)
+    repository = ActivityFunctionRepository(db)
+    funcao = await repository.get_function(activity_function_id)
+    if funcao is None or funcao.atividade_uuid != atividade.uuid:
+        raise NotFoundError("Função da atividade")
+    if dados.dificuldade is not None:
+        funcao.dificuldade = dados.dificuldade.upper()
+    if dados.nota_maxima is not None:
+        funcao.nota_maxima = dados.nota_maxima
+    await db.commit()
+    await db.refresh(funcao)
+    casos = await repository.list_cases([funcao.uuid])
+    return funcao, casos
 
 
 async def reordenar_funcoes_internas(
@@ -215,3 +264,24 @@ async def encerrar_atividade(activity_id: UUID, professor: Usuario, db: AsyncSes
 def atividade_aceita_submissoes(atividade: Atividade, agora: datetime | None = None) -> bool:
     agora = agora or datetime.now(timezone.utc)
     return atividade.status == "PUBLICADA" and atividade.inicio_em <= agora < atividade.fim_em
+
+
+async def remover_atividade(activity_id: UUID, professor: Usuario, db: AsyncSession) -> None:
+    atividade = await obter_atividade(activity_id, professor, db)
+    if atividade.status not in ("RASCUNHO", "PUBLICADA"):
+        raise CodelabException("Apenas rascunhos ou atividades publicadas sem submissões podem ser excluídas.", 409)
+    if atividade.status == "PUBLICADA":
+        from ..repositories.submission_repository import SubmissionRepository
+        submissoes = await SubmissionRepository(db).list_by_class(atividade.turma_uuid)
+        repository = ActivityFunctionRepository(db)
+        funcoes = await repository.list_functions(activity_id)
+        funcoes_uuids = {f.uuid for f in funcoes}
+        if any(s.funcao_atividade_uuid in funcoes_uuids for s in submissoes):
+            raise CodelabException("Não é possível excluir atividade que já possui submissões de alunos.", 409)
+    repository = ActivityFunctionRepository(db)
+    funcoes = await repository.list_functions(activity_id)
+    for funcao in funcoes:
+        await repository.delete_function(funcao)
+    await db.delete(atividade)
+    await db.commit()
+

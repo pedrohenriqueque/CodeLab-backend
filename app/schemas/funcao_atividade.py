@@ -15,6 +15,11 @@ class AssociarFuncaoAtividadeRequest(ApiSchema):
     nota_maxima: Decimal = Field(gt=0, max_digits=5, decimal_places=2)
 
 
+class AtualizarFuncaoAtividadeRequest(ApiSchema):
+    dificuldade: Literal["FACIL", "MEDIO", "DIFICIL"] | None = None
+    nota_maxima: Decimal | None = Field(default=None, gt=0, max_digits=5, decimal_places=2)
+
+
 class ReordenarFuncoesAtividadeRequest(ApiSchema):
     funcoes_atividade_uuid: list[UUID] = Field(min_length=1, max_length=100)
 
@@ -25,6 +30,7 @@ class CasoTesteAtividadeResponse(ApiSchema):
     retorno_esperado: Any
     visibilidade: VisibilidadeCaso
     descricao: str
+    peso: Decimal = Decimal("1.00")
 
 
 class FuncaoAtividadeResponse(ApiSchema):

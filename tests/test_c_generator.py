@@ -26,7 +26,7 @@ class CGeneratorTests(unittest.TestCase):
         self.assertNotIn("expected=", program.source_code)
         self.assertIn('printf("' + program.result_marker, program.source_code)
 
-    def test_supports_strings_booleans_and_vector_parameters(self):
+    def test_supports_booleans_and_vector_parameters_with_explicit_length(self):
         program = gerar_programa_teste(
             {
                 "nome": "tem_positivo",
@@ -40,6 +40,52 @@ class CGeneratorTests(unittest.TestCase):
         self.assertIn("bool tem_positivo(int numeros[], int n);", program.source_code)
         self.assertIn("(int[]){-1, 0, 2}", program.source_code)
         self.assertIn("bool expected = true;", program.source_code)
+
+    def test_supports_long_float_char_and_string_returns(self):
+        examples = (
+            (
+                {"nome": "somarLongos", "tipo_retorno": "long", "parametros": [
+                    {"nome": "a", "tipo": "long"}, {"nome": "b", "tipo": "long"},
+                ]},
+                [{"entradas": [5_000_000_000, 3], "retorno_esperado": 5_000_000_003}],
+                "long somarLongos(long a, long b) { return a + b; }",
+                "long somarLongos(long a, long b);",
+                "long expected = 5000000003;",
+            ),
+            (
+                {"nome": "dobrarFloat", "tipo_retorno": "float", "parametros": [
+                    {"nome": "valor", "tipo": "float"},
+                ]},
+                [{"entradas": [1.5], "retorno_esperado": 3.0}],
+                "float dobrarFloat(float valor) { return valor * 2.0f; }",
+                "float dobrarFloat(float valor);",
+                "fabs((double) got - (double) expected) <= 0.0001",
+            ),
+            (
+                {"nome": "proximaLetra", "tipo_retorno": "char", "parametros": [
+                    {"nome": "letra", "tipo": "char"},
+                ]},
+                [{"entradas": ["A"], "retorno_esperado": "B"}],
+                "char proximaLetra(char letra) { return (char)(letra + 1); }",
+                "char proximaLetra(char letra);",
+                "char expected = 'B';",
+            ),
+            (
+                {"nome": "ecoTexto", "tipo_retorno": "string", "parametros": [
+                    {"nome": "texto", "tipo": "string"},
+                ]},
+                [{"entradas": ["CodeLab"], "retorno_esperado": "CodeLab"}],
+                "const char *ecoTexto(const char *texto) { return texto; }",
+                "const char * ecoTexto(const char * texto);",
+                "strcmp(got, expected) == 0",
+            ),
+        )
+
+        for function, cases, code, declaration, comparison in examples:
+            with self.subTest(function=function["nome"]):
+                program = gerar_programa_teste(function, cases, code)
+                self.assertIn(declaration, program.source_code)
+                self.assertIn(comparison, program.source_code)
 
     def test_rejects_unsupported_returns_and_invalid_case_shape(self):
         function = {"nome": "preencher", "tipo_retorno": "int[]", "parametros": []}

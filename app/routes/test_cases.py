@@ -13,7 +13,7 @@ from ..services.test_case_service import atualizar_caso, criar_caso, listar_caso
 router = APIRouter(tags=["Casos de teste"])
 
 def to_response(caso: CasoTeste) -> CasoTesteResponse:
-    return CasoTesteResponse(uuid=caso.uuid, entradas=caso.entradas, retorno_esperado=caso.retorno_esperado, visibilidade=caso.visibilidade, descricao=caso.descricao)
+    return CasoTesteResponse(uuid=caso.uuid, entradas=caso.entradas, retorno_esperado=caso.retorno_esperado, visibilidade=caso.visibilidade, descricao=caso.descricao, peso=getattr(caso, "peso", 1))
 
 @router.post("/funcoes/{function_id}/casos", response_model=CasoTesteResponse, status_code=status.HTTP_201_CREATED)
 async def create_test_case(function_id: UUID, dados: CriarCasoTesteRequest, professor: Usuario = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> CasoTesteResponse:

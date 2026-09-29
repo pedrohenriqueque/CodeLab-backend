@@ -1,4 +1,5 @@
 from copy import deepcopy
+from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -114,6 +115,7 @@ async def duplicar_funcao(
                 entradas=deepcopy(caso_origem.entradas),
                 retorno_esperado=deepcopy(caso_origem.retorno_esperado),
                 visibilidade=caso_origem.visibilidade,
+                peso=getattr(caso_origem, "peso", Decimal("1.00")),
             ))
         await db.commit()
     except Exception:

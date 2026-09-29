@@ -31,15 +31,17 @@ class TentativaHistoricoResponse(ApiSchema):
     funcao_atividade_uuid: UUID
     atividade_uuid: UUID
     atividade_titulo: str
+    atividade_tipo: str | None = None
     funcao_nome: str
     aluno_nome: str | None = None
     aluno_matricula: str | None = None
     recebida_em: datetime
+    avaliada_em: datetime | None = None
     status: str
     nota: Decimal | None = None
     nota_maxima: Decimal | None = None
-    casos_aprovados: int | None | None = None
-    total_casos: int | None | None = None
+    casos_aprovados: int | None = None
+    total_casos: int | None = None
     falha_tecnica: bool
     codigo_fonte: str | None = None
     resultados_casos: list[dict] | None = None

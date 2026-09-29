@@ -1,3 +1,4 @@
+from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -50,6 +51,8 @@ class AlunoTurmaResponse(ApiSchema):
 class ResultadoAtividadeTurmaResponse(ApiSchema):
     atividade_uuid: UUID
     titulo: str
+    tipo: str | None = None
+    fim_em: datetime | None = None
     enviados: int
     total_alunos: int
     media_nota: Decimal | None
