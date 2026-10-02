@@ -50,6 +50,7 @@ class SubmissionServiceTests(unittest.TestCase):
         self.db = Mock()
         self.db.commit = AsyncMock()
         self.db.refresh = AsyncMock()
+        self.db.scalar = AsyncMock(return_value=None)
 
     def _patch_data(self, *, enrolled=True):
         return (
@@ -152,10 +153,19 @@ class SubmissionServiceTests(unittest.TestCase):
         with patches[0], patches[1], patches[2], patches[3], patch(
             "backend_v2.app.services.submission_service.SubmissionRepository.count_consumed_attempts",
             new=AsyncMock(return_value=1),
-        ):
+        ) as count_consumed:
             with self.assertRaisesRegex(CodelabException, "limite de tentativas"):
                 asyncio.run(criar_tentativa(self.request, self.student, self.db, FakeExecutor()))
+            count_consumed.assert_awaited_once_with(self.function.uuid, self.student.uuid, is_prova=True)
 
+        self.db.commit.assert_not_awaited()
+
+    def test_rejects_submission_when_max_score_already_achieved(self):
+        patches = self._patch_data()
+        self.db.scalar = AsyncMock(return_value=Decimal("10.00"))
+        with patches[0], patches[1], patches[2], patches[3], patches[4]:
+            with self.assertRaisesRegex(CodelabException, "pontuação máxima"):
+                asyncio.run(criar_tentativa(self.request, self.student, self.db, FakeExecutor()))
         self.db.commit.assert_not_awaited()
 
     def test_open_proof_submission_response_hides_grade_and_case_counts(self):
@@ -378,3 +388,48 @@ class SubmissionHistoryTests(unittest.TestCase):
                 asyncio.run(consultar_tentativa(self.attempt.uuid, other_teacher, self.db))
 
         self.db.get.assert_not_awaited()
+
+
+class ProgressServiceTests(unittest.TestCase):
+    def test_exam_progress_ignores_compilation_and_technical_errors(self):
+        from backend_v2.app.services.progress_service import consultar_progresso
+
+        student = SimpleNamespace(uuid=uuid4(), perfil=PerfilUsuario.ALUNO)
+        func_uuid = uuid4()
+        activity_uuid = uuid4()
+        activity = SimpleNamespace(
+            uuid=activity_uuid,
+            turma_uuid=uuid4(),
+            status="PUBLICADA",
+            tipo="PROVA",
+            fim_em=datetime.now(timezone.utc) + timedelta(hours=2),
+        )
+        function = SimpleNamespace(uuid=func_uuid, atividade_uuid=activity_uuid, nota_maxima=Decimal("10.00"))
+        erro_comp = SimpleNamespace(
+            uuid=uuid4(),
+            funcao_atividade_uuid=func_uuid,
+            aluno_uuid=student.uuid,
+            recebida_em=datetime.now(timezone.utc),
+            status="ERRO_COMPILACAO",
+            nota=Decimal("0.00"),
+        )
+        falha_tec = SimpleNamespace(
+            uuid=uuid4(),
+            funcao_atividade_uuid=func_uuid,
+            aluno_uuid=student.uuid,
+            recebida_em=datetime.now(timezone.utc) - timedelta(minutes=5),
+            status="FALHA_TECNICA",
+            nota=None,
+        )
+
+        with patch("backend_v2.app.services.progress_service.obter_atividade", new=AsyncMock(return_value=activity)), \
+             patch("backend_v2.app.services.progress_service.ActivityFunctionRepository.list_functions", new=AsyncMock(return_value=[function])), \
+             patch("backend_v2.app.services.progress_service.SubmissionRepository.list_by_student", new=AsyncMock(return_value=[erro_comp, falha_tec])):
+            progress = asyncio.run(consultar_progresso(activity_uuid, student, Mock()))
+
+        self.assertEqual(len(progress), 1)
+        self.assertFalse(progress[0]["enviada"])
+        self.assertFalse(progress[0]["avaliada"])
+        self.assertEqual(progress[0]["total_tentativas"], 0)
+        self.assertIsNone(progress[0]["ultima_tentativa_uuid"])
+

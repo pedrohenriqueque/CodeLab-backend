@@ -23,3 +23,17 @@ class ActivityTests(unittest.TestCase):
   professor=SimpleNamespace(uuid=uuid4(),perfil=PerfilUsuario.PROFESSOR); db=Mock(); db.get=AsyncMock(return_value=SimpleNamespace(professor_uuid=uuid4()))
   now=datetime.now(timezone.utc)
   with self.assertRaisesRegex(CodelabException,"não gerencia"): asyncio.run(criar_atividade(CriarAtividadeRequest(turmaUuid=uuid4(),titulo="Lista",inicioEm=now,fimEm=now+timedelta(days=1)),professor,db))
+ def test_create_activity_with_null_or_empty_description(self):
+  professor=SimpleNamespace(uuid=uuid4(),perfil=PerfilUsuario.PROFESSOR)
+  turma=SimpleNamespace(professor_uuid=professor.uuid)
+  now=datetime.now(timezone.utc); db=Mock(); db.get=AsyncMock(return_value=turma); db.commit=AsyncMock(); db.refresh=AsyncMock()
+  # Test with descricao=None (as sent by frontend JSON null)
+  req_null = CriarAtividadeRequest(turmaUuid=uuid4(), titulo="Lista Sem Descrição", descricao=None, inicioEm=now, fimEm=now+timedelta(days=1))
+  self.assertIsNone(req_null.descricao)
+  activity_null = asyncio.run(criar_atividade(req_null, professor, db))
+  self.assertEqual(activity_null.descricao, "")
+  # Test with descricao omitted
+  req_default = CriarAtividadeRequest(turmaUuid=uuid4(), titulo="Lista Default", inicioEm=now, fimEm=now+timedelta(days=1))
+  self.assertEqual(req_default.descricao, "")
+  activity_default = asyncio.run(criar_atividade(req_default, professor, db))
+  self.assertEqual(activity_default.descricao, "")

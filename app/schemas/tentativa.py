@@ -18,6 +18,7 @@ class TentativaResponse(ApiSchema):
     recebida_em: datetime
     avaliada_em: datetime | None
     status: str
+    tentativa_numero: int | None = None
     total_casos: int | None
     casos_aprovados: int | None
     falha_tecnica: bool
@@ -38,6 +39,7 @@ class TentativaHistoricoResponse(ApiSchema):
     recebida_em: datetime
     avaliada_em: datetime | None = None
     status: str
+    tentativa_numero: int | None = None
     nota: Decimal | None = None
     nota_maxima: Decimal | None = None
     casos_aprovados: int | None = None

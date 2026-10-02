@@ -11,6 +11,8 @@ class ProgressoFuncaoResponse(ApiSchema):
     aprovada: bool | None
     melhor_nota: Decimal | None
     total_tentativas: int = 0
+    melhor_tentativa_uuid: UUID | None = None
+    ultima_tentativa_uuid: UUID | None = None
 
 
 class ProgressoAtividadeResponse(ApiSchema):

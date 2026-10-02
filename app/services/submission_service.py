@@ -44,10 +44,15 @@ async def criar_tentativa(
     if not atividade_aceita_submissoes(atividade):
         raise CodelabException("A atividade não está aberta para submissões.", 409)
 
-    limite = 1 if atividade.tipo == "PROVA" or not atividade.permitir_multiplas_submissoes else atividade.max_tentativas_por_funcao
-    consumidas = await SubmissionRepository(db).count_consumed_attempts(funcao.uuid, aluno.uuid)
+    is_prova = atividade.tipo == "PROVA"
+    limite = 1 if is_prova or not atividade.permitir_multiplas_submissoes else atividade.max_tentativas_por_funcao
+    consumidas = await SubmissionRepository(db).count_consumed_attempts(funcao.uuid, aluno.uuid, is_prova=is_prova)
     if limite is not None and consumidas >= limite:
         raise CodelabException("O limite de tentativas para esta função foi atingido.", 409)
+
+    melhor_nota = await SubmissionRepository(db).best_score(funcao.uuid, aluno.uuid)
+    if melhor_nota is not None and funcao.nota_maxima is not None and Decimal(melhor_nota) >= Decimal(funcao.nota_maxima):
+        raise CodelabException("Você já atingiu a pontuação máxima para esta função.", 409)
 
     casos = await functions.list_cases([funcao.uuid])
     if not casos:
@@ -213,6 +218,7 @@ async def consultar_tentativa(
         raise CodelabException("Operação não permitida para este perfil.", 403)
 
     liberar = professor or resultado_liberado(atividade)
+
     data = {
         "uuid": tentativa.uuid,
         "funcao_atividade_uuid": funcao.uuid,

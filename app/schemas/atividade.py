@@ -6,7 +6,7 @@ from ..core.schemas import ApiSchema
 class CriarAtividadeRequest(ApiSchema):
     turma_uuid: UUID
     titulo: str = Field(min_length=1, max_length=200)
-    descricao: str = Field(default="", max_length=10000)
+    descricao: str | None = Field(default="", max_length=10000)
     inicio_em: datetime
     fim_em: datetime
     tipo: str = Field(default="EXERCICIO", min_length=1, max_length=16)
@@ -39,7 +39,7 @@ class AtividadeResponse(ApiSchema):
     uuid: UUID
     turma_uuid: UUID
     titulo: str
-    descricao: str
+    descricao: str | None = ""
     inicio_em: datetime
     fim_em: datetime
     status: str

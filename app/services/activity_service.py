@@ -44,7 +44,7 @@ async def _viewable_activity(activity_id: UUID, usuario: Usuario, db: AsyncSessi
 
 async def criar_atividade(dados: CriarAtividadeRequest, professor: Usuario, db: AsyncSession) -> Atividade:
     await _owned_class(dados.turma_uuid, professor, db)
-    atividade = Atividade(turma_uuid=dados.turma_uuid, titulo=dados.titulo.strip(), descricao=dados.descricao.strip(), inicio_em=dados.inicio_em, fim_em=dados.fim_em, status="RASCUNHO", tipo=dados.tipo, permitir_multiplas_submissoes=dados.permitir_multiplas_submissoes if dados.tipo == "EXERCICIO" else False, max_tentativas_por_funcao=dados.max_tentativas_por_funcao if dados.tipo == "EXERCICIO" and dados.permitir_multiplas_submissoes else None, mostrar_ocultos_apos_fechamento=dados.mostrar_ocultos_apos_fechamento if dados.tipo == "EXERCICIO" else False)
+    atividade = Atividade(turma_uuid=dados.turma_uuid, titulo=dados.titulo.strip(), descricao=(dados.descricao or "").strip(), inicio_em=dados.inicio_em, fim_em=dados.fim_em, status="RASCUNHO", tipo=dados.tipo, permitir_multiplas_submissoes=dados.permitir_multiplas_submissoes if dados.tipo == "EXERCICIO" else False, max_tentativas_por_funcao=dados.max_tentativas_por_funcao if dados.tipo == "EXERCICIO" and dados.permitir_multiplas_submissoes else None, mostrar_ocultos_apos_fechamento=dados.mostrar_ocultos_apos_fechamento if dados.tipo == "EXERCICIO" else False)
     await ActivityRepository(db).add(atividade); await db.commit(); await db.refresh(atividade)
     return atividade
 
@@ -91,7 +91,7 @@ async def atualizar_atividade(activity_id: UUID, dados: AtualizarAtividadeReques
     inicio = dados.inicio_em or atividade.inicio_em; fim = dados.fim_em or atividade.fim_em
     if inicio >= fim: raise CodelabException("A data inicial deve anteceder a final.", 422)
     if dados.titulo is not None and atividade.status == "RASCUNHO": atividade.titulo = dados.titulo.strip()
-    if dados.descricao is not None and atividade.status == "RASCUNHO": atividade.descricao = dados.descricao.strip()
+    if dados.descricao is not None and atividade.status == "RASCUNHO": atividade.descricao = (dados.descricao or "").strip()
     if dados.permitir_multiplas_submissoes is not None and atividade.status == "RASCUNHO":
         atividade.permitir_multiplas_submissoes = dados.permitir_multiplas_submissoes if atividade.tipo == "EXERCICIO" else False
     if dados.max_tentativas_por_funcao is not None and atividade.status == "RASCUNHO":

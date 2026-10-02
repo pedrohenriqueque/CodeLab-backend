@@ -35,14 +35,17 @@ class SubmissionRepository:
         )
         return list(result)
 
-    async def count_consumed_attempts(self, function_id: UUID, student_id: UUID) -> int:
-        return await self._db.scalar(
-            select(func.count()).select_from(Tentativa).where(
-                Tentativa.funcao_atividade_uuid == function_id,
-                Tentativa.aluno_uuid == student_id,
-                Tentativa.status != "FALHA_TECNICA",
-            )
-        ) or 0
+    async def count_consumed_attempts(
+        self, function_id: UUID, student_id: UUID, *, is_prova: bool = False
+    ) -> int:
+        query = select(func.count()).select_from(Tentativa).where(
+            Tentativa.funcao_atividade_uuid == function_id,
+            Tentativa.aluno_uuid == student_id,
+            Tentativa.status != "FALHA_TECNICA",
+        )
+        if is_prova:
+            query = query.where(Tentativa.status != "ERRO_COMPILACAO")
+        return await self._db.scalar(query) or 0
 
     async def list_by_professor(self, professor_id: UUID) -> list[Tentativa]:
         result = await self._db.scalars(
