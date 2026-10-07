@@ -24,7 +24,9 @@ class CGeneratorTests(unittest.TestCase):
         self.assertIn("int somar(int a, int b);", program.source_code)
         self.assertIn(program.result_marker, program.source_code)
         self.assertNotIn("expected=", program.source_code)
-        self.assertIn('printf("' + program.result_marker, program.source_code)
+        self.assertIn('printf("\\n' + program.result_marker + 'CASE|0|%d|', program.source_code)
+        self.assertIn('printf("%d", got);', program.source_code)
+        self.assertIn('fflush(stdout);', program.source_code)
 
     def test_supports_booleans_and_vector_parameters_with_explicit_length(self):
         program = gerar_programa_teste(
@@ -107,7 +109,7 @@ class CGeneratorTests(unittest.TestCase):
         class FakeExecutor:
             async def executar_codigo(self, source_code):
                 marker = source_code.split('__CODELAB_RESULT_')[1].split('__')[0]
-                return {"status": {"id": 3}, "stdout": f"__CODELAB_RESULT_{marker}__1/1|1\n"}
+                return {"status": {"id": 3}, "stdout": f"__CODELAB_RESULT_{marker}__CASE|0|1|4\n"}
 
         result = __import__("asyncio").run(EvaluationService(FakeExecutor()).avaliar(
             {"nome": "identidade", "tipo_retorno": "int", "parametros": [{"nome": "a", "tipo": "int"}]},
@@ -116,6 +118,7 @@ class CGeneratorTests(unittest.TestCase):
         ))
         self.assertEqual((result.passed_cases, result.total_cases, result.technical_failure), (1, 1, False))
         self.assertFalse(hasattr(result, "source_code"))
+        self.assertEqual(result.case_returns[0].value, 4)
 
     def test_evaluation_keeps_judge0_outage_distinct_from_wrong_answer(self):
         class UnavailableExecutor:

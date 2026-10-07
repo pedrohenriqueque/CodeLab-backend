@@ -17,7 +17,7 @@ from ..repositories.enrollment_repository import EnrollmentRepository
 from ..repositories.submission_repository import SubmissionRepository
 from ..schemas.tentativa import CriarTentativaRequest
 from .activity_service import atividade_aceita_submissoes
-from .evaluation_service import CodeExecutor, EvaluationService
+from .evaluation_service import CapturedReturn, CodeExecutor, EvaluationService
 from .gerador_service import UnsupportedCSignatureError
 
 
@@ -104,8 +104,14 @@ async def criar_tentativa(
                 tentativa_uuid=tentativa.uuid,
                 caso_teste_atividade_uuid=caso.uuid,
                 aprovado=aprovado,
+                retorno_obtido=capturado.value,
+                status_retorno=capturado.status,
             )
-            for caso, aprovado in zip(casos, resultados_por_caso, strict=True)
+            for caso, aprovado, capturado in zip(
+                casos, resultados_por_caso,
+                resultado.case_returns or tuple(CapturedReturn() for _ in casos),
+                strict=True,
+            )
         ])
     tentativa.avaliada_em = datetime.now(timezone.utc)
     await db.commit()
@@ -243,12 +249,22 @@ async def consultar_tentativa(
             "casos_aprovados": tentativa.casos_aprovados,
             "total_casos": tentativa.total_casos,
         })
-        resultados = {item.caso_teste_atividade_uuid: item.aprovado for item in await SubmissionRepository(db).list_case_results(tentativa.uuid)}
+        resultados = {item.caso_teste_atividade_uuid: item for item in await SubmissionRepository(db).list_case_results(tentativa.uuid)}
         casos = await ActivityFunctionRepository(db).list_cases([funcao.uuid])
-        if professor:
-            data["resultados_casos"] = [{"casoTesteAtividadeUuid": caso.uuid, "aprovado": resultados.get(caso.uuid, False), "entradas": caso.entradas, "retornoEsperado": caso.retorno_esperado, "visibilidade": caso.visibilidade} for caso in casos]
-        else:
-            data["resultados_casos"] = [{"casoTesteAtividadeUuid": caso.uuid, "aprovado": resultados.get(caso.uuid, False), "entradas": caso.entradas, "retornoEsperado": caso.retorno_esperado, "visibilidade": caso.visibilidade} for caso in casos if getattr(caso, "visibilidade", "").upper() == "VISIVEL"]
+        data["resultados_casos"] = []
+        for caso in casos:
+            if not professor and caso.visibilidade.upper() != "VISIVEL":
+                continue
+            resultado = resultados.get(caso.uuid)
+            data["resultados_casos"].append({
+                "casoTesteAtividadeUuid": caso.uuid,
+                "aprovado": resultado.aprovado if resultado else False,
+                "entradas": caso.entradas,
+                "retornoEsperado": caso.retorno_esperado,
+                "retornoObtido": getattr(resultado, "retorno_obtido", None),
+                "statusRetorno": getattr(resultado, "status_retorno", "NAO_INFORMADO"),
+                "visibilidade": caso.visibilidade,
+            })
     if professor:
         aluno = (
             alunos_por_uuid.get(tentativa.aluno_uuid)

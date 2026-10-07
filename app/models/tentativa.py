@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -41,3 +41,5 @@ class ResultadoCasoTentativa(Base):
         UUID(as_uuid=True), ForeignKey("casos_teste_atividade.uuid", ondelete="RESTRICT"), nullable=False
     )
     aprovado: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    retorno_obtido: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    status_retorno: Mapped[str] = mapped_column(String(32), nullable=False, default="NAO_INFORMADO")

@@ -134,7 +134,7 @@ class DatabaseTests(unittest.TestCase):
         settings = fixture_settings()
         config = manage_db.migration_config(settings)
         script = ScriptDirectory.from_config(config)
-        self.assertEqual(script.get_current_head(), "d4f1b7c92031")
+        self.assertEqual(script.get_current_head(), "e5a2c8d73041")
         rendered = io.StringIO()
         with contextlib.redirect_stdout(rendered):
             command.upgrade(config, "head", sql=True)
@@ -150,6 +150,8 @@ class DatabaseTests(unittest.TestCase):
         self.assertIn("CREATE TABLE tentativas", sql)
         self.assertIn("ALTER TABLE tentativas ADD COLUMN nota", sql)
         self.assertIn("CREATE TABLE resultados_casos_tentativa", sql)
+        self.assertIn("ALTER TABLE resultados_casos_tentativa ADD COLUMN retorno_obtido JSON", sql)
+        self.assertIn("status_retorno VARCHAR(32) DEFAULT 'NAO_INFORMADO' NOT NULL", sql)
         self.assertIn("CREATE TABLE atividades", sql)
         self.assertIn("CREATE TABLE funcoes_atividade", sql)
         self.assertIn("CREATE TABLE casos_teste_atividade", sql)

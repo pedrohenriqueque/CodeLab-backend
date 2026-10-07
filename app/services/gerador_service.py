@@ -22,6 +22,7 @@ _C_TYPES = {
     "char": "char", "bool": "bool", "string": "const char *",
 }
 _FLOAT_TYPES = {"float", "double"}
+MAX_CAPTURED_STRING_BYTES = 4096
 
 
 def _c_type(type_name: str, *, parameter: bool = False) -> str:
@@ -60,12 +61,45 @@ def _literal(value: Any, type_name: str) -> str:
     if normalized == "char":
         if not isinstance(value, str) or len(value) != 1:
             raise UnsupportedCSignatureError("Valor char inválido.")
-        return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+        escaped = value.replace("\\", "\\\\").replace("'", "\\'")
+        if ord(value) < 32 or ord(value) == 127:
+            escaped = f"\\x{ord(value):02x}"
+        return "'" + escaped + "'"
     if normalized == "string":
         if not isinstance(value, str):
             raise UnsupportedCSignatureError("Valor string inválido.")
         return json.dumps(value, ensure_ascii=False)
     raise UnsupportedCSignatureError("Tipo de C não suportado.")
+
+
+def _capture_return(type_name: str) -> list[str]:
+    """Serializa got; texto usa hexadecimal para não confundir o protocolo com printf do aluno."""
+    if type_name in {"int", "long"}:
+        formatter = "%ld" if type_name == "long" else "%d"
+        return [f'printf("{formatter}", got);']
+    if type_name == "bool":
+        return ['fputs(got ? "true" : "false", stdout);']
+    if type_name in _FLOAT_TYPES:
+        precision = 9 if type_name == "float" else 17
+        return [
+            'if (isnan(got)) fputs("\\\"NaN\\\"", stdout);',
+            'else if (isinf(got)) fputs(got < 0 ? "\\\"-Infinity\\\"" : "\\\"Infinity\\\"", stdout);',
+            f'else printf("%.{precision}g", (double) got);',
+        ]
+    if type_name == "char":
+        return ['printf("x:%02x", (unsigned int)(unsigned char) got);']
+    return [
+        'if (got == NULL) fputs("null", stdout);',
+        'else {',
+        'size_t captured_length = 0;',
+        f'while (captured_length <= {MAX_CAPTURED_STRING_BYTES} && got[captured_length] != \'\\0\') captured_length++;',
+        f'if (captured_length > {MAX_CAPTURED_STRING_BYTES}) fputs("TRUNCATED", stdout);',
+        'else {',
+        'fputs("x:", stdout);',
+        'for (size_t i = 0; i < captured_length; i++) printf("%02x", (unsigned int)(unsigned char) got[i]);',
+        '}',
+        '}',
+    ]
 
 
 def gerar_programa_teste(funcao: dict[str, Any], casos_teste: list[dict[str, Any]], codigo_aluno: str) -> GeneratedCProgram:
@@ -87,7 +121,7 @@ def gerar_programa_teste(funcao: dict[str, Any], casos_teste: list[dict[str, Any
     lines = [
         "#include <stdio.h>", "#include <stdbool.h>", "#include <string.h>", "#include <math.h>",
         f"{return_type} {nome}({', '.join(declarations) or 'void'});", "#line 1", codigo_aluno,
-        "int main(void) {", "int passed = 0;", f"int case_results[{len(casos_teste)}] = {{0}};",
+        "int main(void) {",
     ]
     for index, case in enumerate(casos_teste, start=1):
         entries = case.get("entradas", case.get("inputs"))
@@ -106,11 +140,10 @@ def gerar_programa_teste(funcao: dict[str, Any], casos_teste: list[dict[str, Any
         else:
             lines.append(f"{return_type} expected = {_literal(expected, retorno)};")
             condition = "got == expected"
-        lines.append(f"if ({condition}) {{ passed++; case_results[{index - 1}] = 1; }}")
+        lines.append(f"bool approved = {condition};")
+        lines.append(f'printf("\\n{marker}CASE|{index - 1}|%d|", approved ? 1 : 0);')
+        lines.extend(_capture_return(retorno.lower()))
+        lines.extend(['printf("\\n");', 'fflush(stdout);'])
         lines.append("}")
-    lines.extend([
-        f'printf("{marker}%d/{len(casos_teste)}|", passed);',
-        f'for (int i = 0; i < {len(casos_teste)}; i++) printf("%d", case_results[i]);',
-        'printf("\\n");', "return 0;", "}",
-    ])
+    lines.extend(["return 0;", "}"])
     return GeneratedCProgram("\n".join(lines), len(casos_teste), marker)

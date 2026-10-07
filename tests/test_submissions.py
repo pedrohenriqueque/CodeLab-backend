@@ -17,7 +17,7 @@ from backend_v2.app.routes.activities import list_activity_functions
 class FakeExecutor:
     async def executar_codigo(self, source_code):
         marker = source_code.split("__CODELAB_RESULT_")[1].split("__")[0]
-        return {"status": {"id": 3}, "stdout": f"__CODELAB_RESULT_{marker}__1/1|1\n"}
+        return {"status": {"id": 3}, "stdout": f"__CODELAB_RESULT_{marker}__CASE|0|1|7\n"}
 
 
 class SubmissionServiceTests(unittest.TestCase):
@@ -73,6 +73,44 @@ class SubmissionServiceTests(unittest.TestCase):
         self.assertNotEqual(first, second)
         self.assertEqual(self.db.commit.await_count, 4)
 
+    def test_persists_actual_return_instead_of_expected_value(self):
+        class WrongReturnExecutor:
+            async def executar_codigo(self, source_code):
+                marker = source_code.split("__CODELAB_RESULT_")[1].split("__")[0]
+                return {"status": {"id": 3}, "stdout": f"__CODELAB_RESULT_{marker}__CASE|0|0|9\n"}
+
+        patches = self._patch_data()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patch(
+            "backend_v2.app.services.submission_service.SubmissionRepository.add_case_results", new=AsyncMock(),
+        ) as persist:
+            tentativa = asyncio.run(criar_tentativa(self.request, self.student, self.db, WrongReturnExecutor()))
+        saved = persist.await_args.args[0][0]
+        self.assertEqual(saved.retorno_obtido, 9)
+        self.assertEqual(saved.status_retorno, "DISPONIVEL")
+        self.assertEqual(saved.caso_teste_atividade_uuid, self.case.uuid)
+        self.assertFalse(saved.aprovado)
+        self.assertEqual(tentativa.nota, Decimal("0.00"))
+
+    def test_partial_execution_preserves_weighted_grade_and_missing_case_status(self):
+        class PartialExecutor:
+            async def executar_codigo(self, source_code):
+                marker = source_code.split("__CODELAB_RESULT_")[1].split("__")[0]
+                return {"status": {"id": 7}, "stdout": f"__CODELAB_RESULT_{marker}__CASE|0|1|7\n"}
+
+        self.case.peso = Decimal("1")
+        second = SimpleNamespace(uuid=uuid4(), entradas=[9], retorno_esperado=9, peso=Decimal("3"))
+        patches = self._patch_data()
+        with patches[0], patches[2], patches[3], patches[4], patch(
+            "backend_v2.app.services.submission_service.ActivityFunctionRepository.list_cases", new=AsyncMock(return_value=[self.case, second]),
+        ), patch(
+            "backend_v2.app.services.submission_service.SubmissionRepository.add_case_results", new=AsyncMock(),
+        ) as persist:
+            tentativa = asyncio.run(criar_tentativa(self.request, self.student, self.db, PartialExecutor()))
+        self.assertEqual(tentativa.nota, Decimal("2.50"))
+        saved = persist.await_args.args[0]
+        self.assertEqual([item.status_retorno for item in saved], ["DISPONIVEL", "ERRO_EXECUCAO"])
+        self.assertIsNone(saved[1].retorno_obtido)
+
     def test_rejects_student_outside_class_before_recording_attempt(self):
         patches = self._patch_data(enrolled=False)
         with patches[0], patches[1], patches[2], patches[3], patches[4]:
@@ -126,7 +164,7 @@ class SubmissionServiceTests(unittest.TestCase):
         class WrongAnswerExecutor:
             async def executar_codigo(self, source_code):
                 marker = source_code.split("__CODELAB_RESULT_")[1].split("__")[0]
-                return {"status": {"id": 3}, "stdout": f"__CODELAB_RESULT_{marker}__0/1|0\n"}
+                return {"status": {"id": 3}, "stdout": f"__CODELAB_RESULT_{marker}__CASE|0|0|8\n"}
 
         patches = self._patch_data()
         with patches[0], patches[1], patches[2], patches[3], patches[4]:
@@ -320,6 +358,45 @@ class SubmissionHistoryTests(unittest.TestCase):
         self.assertFalse(TentativaHistoricoResponse(**result).falha_tecnica)
         self.db.get.assert_awaited_once()
 
+    def test_actual_return_is_exposed_only_for_authorized_cases_and_preserves_zero(self):
+        from contextlib import ExitStack
+
+        visible = SimpleNamespace(uuid=uuid4(), entradas=[1], retorno_esperado=1, visibilidade="VISIVEL")
+        hidden = SimpleNamespace(uuid=uuid4(), entradas=[2], retorno_esperado=2, visibilidade="OCULTO")
+        results = [SimpleNamespace(caso_teste_atividade_uuid=case.uuid, aprovado=False,
+                                   retorno_obtido=0, status_retorno="DISPONIVEL") for case in [visible, hidden]]
+        with ExitStack() as stack:
+            for context in self._patch_history():
+                stack.enter_context(context)
+            stack.enter_context(patch("backend_v2.app.services.submission_service.SubmissionRepository.list_case_results", new=AsyncMock(return_value=results)))
+            stack.enter_context(patch("backend_v2.app.services.submission_service.ActivityFunctionRepository.list_cases", new=AsyncMock(return_value=[visible, hidden])))
+            stack.enter_context(patch("backend_v2.app.services.submission_service.EnrollmentRepository.exists", new=AsyncMock(return_value=True)))
+            student = asyncio.run(consultar_tentativa(self.attempt.uuid, self.student, self.db))
+            teacher = asyncio.run(consultar_tentativa(self.attempt.uuid, self.teacher, self.db))
+            self.activity.tipo = "PROVA"
+            self.activity.fim_em = datetime.now(timezone.utc) + timedelta(hours=1)
+            restricted = asyncio.run(consultar_tentativa(self.attempt.uuid, self.student, self.db))
+        self.assertEqual(len(student["resultados_casos"]), 1)
+        self.assertEqual(len(teacher["resultados_casos"]), 2)
+        self.assertNotIn("resultados_casos", restricted)
+        schema = TentativaHistoricoResponse(**student).model_dump(by_alias=True)
+        self.assertEqual(schema["resultadosCasos"][0]["retornoObtido"], 0)
+        self.assertEqual(schema["resultadosCasos"][0]["statusRetorno"], "DISPONIVEL")
+
+    def test_old_case_results_do_not_invent_an_obtained_return(self):
+        from contextlib import ExitStack
+
+        case = SimpleNamespace(uuid=uuid4(), entradas=[1], retorno_esperado=1, visibilidade="VISIVEL")
+        legacy = SimpleNamespace(caso_teste_atividade_uuid=case.uuid, aprovado=True)
+        with ExitStack() as stack:
+            for context in self._patch_history():
+                stack.enter_context(context)
+            stack.enter_context(patch("backend_v2.app.services.submission_service.SubmissionRepository.list_case_results", new=AsyncMock(return_value=[legacy])))
+            stack.enter_context(patch("backend_v2.app.services.submission_service.ActivityFunctionRepository.list_cases", new=AsyncMock(return_value=[case])))
+            result = asyncio.run(consultar_tentativa(self.attempt.uuid, self.teacher, self.db))
+        self.assertEqual(result["resultados_casos"][0]["statusRetorno"], "NAO_INFORMADO")
+        self.assertIsNone(result["resultados_casos"][0]["retornoObtido"])
+
     def test_student_history_does_not_include_identity_fields(self):
         from contextlib import ExitStack
 
@@ -432,4 +509,3 @@ class ProgressServiceTests(unittest.TestCase):
         self.assertFalse(progress[0]["avaliada"])
         self.assertEqual(progress[0]["total_tentativas"], 0)
         self.assertIsNone(progress[0]["ultima_tentativa_uuid"])
-

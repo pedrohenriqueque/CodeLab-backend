@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import Field
@@ -27,6 +28,16 @@ class TentativaResponse(ApiSchema):
     melhor_nota_funcao: Decimal | None
 
 
+class ResultadoCasoResponse(ApiSchema):
+    caso_teste_atividade_uuid: UUID
+    aprovado: bool
+    entradas: list[Any]
+    retorno_esperado: Any
+    retorno_obtido: Any = None
+    status_retorno: Literal["DISPONIVEL", "NAO_INFORMADO", "NAO_EXECUTADO", "ERRO_EXECUCAO", "LIMITE_EXCEDIDO"] = "NAO_INFORMADO"
+    visibilidade: str
+
+
 class TentativaHistoricoResponse(ApiSchema):
     uuid: UUID
     funcao_atividade_uuid: UUID
@@ -46,4 +57,4 @@ class TentativaHistoricoResponse(ApiSchema):
     total_casos: int | None = None
     falha_tecnica: bool
     codigo_fonte: str | None = None
-    resultados_casos: list[dict] | None = None
+    resultados_casos: list[ResultadoCasoResponse] | None = None

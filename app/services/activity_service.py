@@ -118,6 +118,8 @@ async def associar_funcao(
     _require_draft(atividade)
     origem = await obter_funcao(dados.funcao_uuid, professor, db)
     casos_origem = await TestCaseRepository(db).list_by_function(origem.uuid)
+    if not casos_origem:
+        raise CodelabException("Cadastre ao menos um caso de teste na função antes de adicioná-la à atividade.", 422)
     repository = ActivityFunctionRepository(db)
     interna = FuncaoAtividade(
         uuid=uuid4(),
@@ -284,4 +286,3 @@ async def remover_atividade(activity_id: UUID, professor: Usuario, db: AsyncSess
         await repository.delete_function(funcao)
     await db.delete(atividade)
     await db.commit()
-

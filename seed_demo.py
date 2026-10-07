@@ -60,6 +60,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Insere dados de demonstração no banco configurado.")
     parser.add_argument("--environment", required=True, choices=("development", "production"))
     parser.add_argument("--confirm", required=True)
+    parser.add_argument("--only-case-scenarios", action="store_true", help="Adiciona somente cenários de funções sem casos e atividades com casos ocultos.")
     return parser.parse_args()
 
 
@@ -117,6 +118,7 @@ async def get_or_create_function(
     retorno: str, parametros: list[dict[str, str]], dificuldade: str,
     casos: list[tuple[list[object], object, str]],
     legacy: dict[str, object] | None = None,
+    *, visibilidade_casos: str = "VISIVEL",
 ) -> FuncaoBiblioteca:
     funcao = await session.scalar(select(FuncaoBiblioteca).where(
         FuncaoBiblioteca.professor_uuid == professor.uuid, FuncaoBiblioteca.nome == nome
@@ -158,7 +160,7 @@ async def get_or_create_function(
     if existing is None:
         session.add_all(CasoTeste(
             funcao_uuid=funcao.uuid, entradas=entradas, retorno_esperado=esperado,
-            visibilidade="VISIVEL", descricao=descricao,
+            visibilidade=visibilidade_casos, descricao=descricao,
         ) for entradas, esperado, descricao in casos)
     return funcao
 
@@ -184,6 +186,9 @@ async def create_demo_activity(
     session.add(atividade)
     await session.flush()
     for ordem, origem in enumerate(funcoes, start=1):
+        casos = list(await session.scalars(select(CasoTeste).where(CasoTeste.funcao_uuid == origem.uuid)))
+        if not casos:
+            raise ValueError(f"A função {origem.nome} precisa de casos de teste para ser associada.")
         interna = FuncaoAtividade(
             atividade_uuid=atividade.uuid, nome=origem.nome, enunciado=origem.enunciado,
             tipo_retorno=origem.tipo_retorno, parametros=origem.parametros,
@@ -191,11 +196,10 @@ async def create_demo_activity(
         )
         session.add(interna)
         await session.flush()
-        casos = await session.scalars(select(CasoTeste).where(CasoTeste.funcao_uuid == origem.uuid))
         session.add_all(CasoTesteAtividade(
             funcao_atividade_uuid=interna.uuid, entradas=caso.entradas,
             retorno_esperado=caso.retorno_esperado, visibilidade=caso.visibilidade,
-            descricao=caso.descricao,
+            descricao=caso.descricao, peso=getattr(caso, "peso", Decimal("1.00")),
         ) for caso in casos)
     return atividade
 
@@ -254,15 +258,56 @@ async def ensure_demo_attempts(session: AsyncSession, atividade: Atividade, alun
             ))
 
 
-async def seed(settings: Settings) -> None:
+async def seed_case_scenarios(session: AsyncSession, professor: Usuario, turma: Turma) -> None:
+    """Cenários adicionais, sem substituir funções, atividades ou tentativas existentes."""
+    await get_or_create_function(
+        session, professor, "semCasosDemo",
+        "Função de demonstração sem casos: deve ficar indisponível ao adicionar funções a uma atividade.",
+        "int", [{"nome": "valor", "tipo": "int"}], "FACIL", [],
+    )
+    somar_oculto = await get_or_create_function(
+        session, professor, "somarOculto", "Retorne a soma de a e b. Os casos de teste são ocultos.",
+        "int", [{"nome": "a", "tipo": "int"}, {"nome": "b", "tipo": "int"}], "FACIL",
+        [([6, 4], 10, "Positivos"), ([-3, 1], -2, "Negativo"), ([0, 0], 0, "Zero")],
+        visibilidade_casos="OCULTO",
+    )
+    positivo_oculto = await get_or_create_function(
+        session, professor, "ehPositivoOculto", "Retorne true se valor for maior que zero e false caso contrário. Os casos são ocultos.",
+        "bool", [{"nome": "valor", "tipo": "int"}], "FACIL",
+        [([5], True, "Positivo"), ([-2], False, "Negativo"), ([0], False, "Zero")],
+        visibilidade_casos="OCULTO",
+    )
+    await session.flush()
+    for titulo, tipo in (("Somente casos ocultos", "EXERCICIO"), ("Trabalho com casos ocultos", "PROVA")):
+        await create_demo_activity(
+            session, turma, titulo,
+            "Implemente as funções conforme seus enunciados. A avaliação é automática, mas não há casos visíveis para consulta.",
+            [somar_oculto, positivo_oculto], "PUBLICADA", tipo,
+        )
+    await create_demo_activity(
+        session, turma, "Rascunho - bloqueio de função sem casos",
+        "Na etapa Funções, tente adicionar semCasosDemo. Cadastre casos na biblioteca para habilitar a associação.",
+        [], "RASCUNHO",
+    )
+
+
+async def seed(settings: Settings, *, only_case_scenarios: bool = False) -> None:
     if settings.environment not in {"development", "production"}:
         raise ValueError("O seed só pode ser executado em development ou production.")
     engine = make_engine(settings)
     try:
         factory = make_session_factory(engine)
         async with factory() as session, session.begin():
-            users = {data[1]: await get_or_create_user(session, *data) for data in USERS}
+            selected_users = [data for data in USERS if not only_case_scenarios or data[1] in {
+                "ana.souza@universidade.br", "pedro.lacerda@aluno.universidade.br",
+            }]
+            users = {data[1]: await get_or_create_user(session, *data) for data in selected_users}
             ana = users["ana.souza@universidade.br"]
+            if only_case_scenarios:
+                turma = await get_or_create_class(session, ana, "Algoritmos I - 2026", "ALG2026A")
+                await ensure_enrollment(session, turma, users["pedro.lacerda@aluno.universidade.br"])
+                await seed_case_scenarios(session, ana, turma)
+                return
             bruno = users["bruno.lima@universidade.br"]
             carla = users["carla.mendes@universidade.br"]
             pedro = users["pedro.lacerda@aluno.universidade.br"]
@@ -361,6 +406,7 @@ async def seed(settings: Settings) -> None:
                 (basicas, pedro), (operacoes, pedro), (operacoes, marina), (fundamentos, julia),
             ):
                 await ensure_demo_attempts(session, atividade, aluno)
+            await seed_case_scenarios(session, ana, algoritmos)
     finally:
         await engine.dispose()
 
@@ -372,7 +418,7 @@ def main() -> int:
         validate_seed_target(settings, args.environment, args.confirm)
     except ValueError as exc:
         raise SystemExit(str(exc)) from None
-    asyncio.run(seed(settings))
+    asyncio.run(seed(settings, only_case_scenarios=args.only_case_scenarios))
     print("Dados de demonstração disponíveis. Senha das novas contas: 123456")
     return 0
 

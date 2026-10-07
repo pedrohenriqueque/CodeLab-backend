@@ -48,6 +48,7 @@ class ActivityFunctionTests(unittest.TestCase):
         self.assertEqual(internal.dificuldade, "MEDIO")
         self.assertEqual(internal.nota_maxima, Decimal("4.50"))
         self.assertEqual(cases[0].funcao_atividade_uuid, internal.uuid)
+        self.assertEqual(cases[0].visibilidade, "OCULTO")
         self.assertNotEqual(cases[0].uuid, self.source_case.__dict__.get("uuid"))
         internal.parametros[0]["nome"] = "alterado"
         cases[0].entradas[0] = 99
@@ -55,6 +56,23 @@ class ActivityFunctionTests(unittest.TestCase):
         self.assertEqual(self.source_case.entradas[0], 1)
         db.commit.assert_awaited_once()
         self.assertEqual(db.add.call_count, 2)
+
+    def test_function_without_cases_is_rejected_before_writing_a_snapshot(self):
+        db = Mock()
+        request = AssociarFuncaoAtividadeRequest(funcaoUuid=self.source.uuid, notaMaxima=Decimal("10"))
+        with (
+            patch("backend_v2.app.services.activity_service.obter_atividade", new=AsyncMock(return_value=self.activity)),
+            patch("backend_v2.app.services.activity_service.obter_funcao", new=AsyncMock(return_value=self.source)),
+            patch("backend_v2.app.services.activity_service.TestCaseRepository.list_by_function", new=AsyncMock(return_value=[])),
+            patch("backend_v2.app.services.activity_service.ActivityFunctionRepository.next_order", new=AsyncMock()) as next_order,
+        ):
+            with self.assertRaisesRegex(CodelabException, "ao menos um caso") as raised:
+                asyncio.run(associar_funcao(self.activity.uuid, request, self.professor, db))
+        self.assertEqual(raised.exception.status_code, 422)
+        next_order.assert_not_awaited()
+        db.add.assert_not_called()
+        db.flush.assert_not_called()
+        db.commit.assert_not_called()
 
     def test_association_is_refused_after_activity_leaves_draft(self):
         self.activity.status = "PUBLICADA"

@@ -56,6 +56,20 @@ class ActivityLifecycleTests(unittest.TestCase):
                 asyncio.run(publicar_atividade(self.activity.uuid, self.professor, db))
         db.commit.assert_not_called()
 
+    def test_publish_accepts_composition_with_only_hidden_cases(self):
+        function = SimpleNamespace(uuid=uuid4(), nota_maxima=Decimal("10"))
+        cases = [SimpleNamespace(funcao_atividade_uuid=function.uuid, visibilidade="OCULTO")]
+        db = Mock(commit=AsyncMock(), refresh=AsyncMock())
+        with (
+            patch("backend_v2.app.services.activity_service.obter_atividade", new=AsyncMock(return_value=self.activity)),
+            patch("backend_v2.app.services.activity_service.ActivityFunctionRepository.list_functions", new=AsyncMock(return_value=[function])),
+            patch("backend_v2.app.services.activity_service.ActivityFunctionRepository.list_cases", new=AsyncMock(return_value=cases)),
+        ):
+            published = asyncio.run(publicar_atividade(self.activity.uuid, self.professor, db))
+        self.assertEqual(published.status, "PUBLICADA")
+        self.assertEqual(cases[0].visibilidade, "OCULTO")
+        db.commit.assert_awaited_once()
+
     def test_publish_rejects_total_different_from_ten(self):
         function = SimpleNamespace(uuid=uuid4(), nota_maxima=Decimal("9"))
         db = Mock()

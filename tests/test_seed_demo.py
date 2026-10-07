@@ -16,6 +16,7 @@ from backend_v2.seed_demo import (
     get_or_create_function,
     get_or_create_user,
     seed,
+    seed_case_scenarios,
     validate_seed_target,
 )
 from backend_v2.app.models.usuario import PerfilUsuario, Usuario
@@ -57,6 +58,38 @@ class SeedTargetTests(unittest.TestCase):
 
 
 class SeedDataTests(unittest.IsolatedAsyncioTestCase):
+    async def test_case_scenarios_keep_empty_function_outside_activity_and_copy_hidden_functions(self):
+        session = Mock(flush=AsyncMock())
+        professor = SimpleNamespace(uuid=uuid4())
+        turma = SimpleNamespace(uuid=uuid4())
+        empty, hidden_sum, hidden_bool = [SimpleNamespace(uuid=uuid4()) for _ in range(3)]
+        with (
+            patch("backend_v2.seed_demo.get_or_create_function", new=AsyncMock(side_effect=[empty, hidden_sum, hidden_bool])) as functions,
+            patch("backend_v2.seed_demo.create_demo_activity", new=AsyncMock()) as activities,
+        ):
+            await seed_case_scenarios(session, professor, turma)
+        self.assertEqual(functions.call_args_list[0].args[7], [])
+        for call in functions.call_args_list[1:]:
+            self.assertEqual(call.kwargs["visibilidade_casos"], "OCULTO")
+            self.assertEqual(len(call.args[7]), 3)
+        for call in activities.call_args_list[:2]:
+            self.assertEqual(call.args[4], [hidden_sum, hidden_bool])
+            self.assertEqual(call.args[5], "PUBLICADA")
+        self.assertEqual(activities.call_args_list[2].args[4], [])
+        self.assertEqual(activities.call_args_list[2].args[5], "RASCUNHO")
+
+    async def test_demo_activity_rejects_empty_function_before_creating_internal_function(self):
+        session = Mock()
+        session.scalar = AsyncMock(return_value=None)
+        session.scalars = AsyncMock(return_value=[])
+        session.flush = AsyncMock()
+        turma = SimpleNamespace(uuid=uuid4())
+        function = SimpleNamespace(uuid=uuid4(), nome="semCasosDemo")
+        with self.assertRaisesRegex(ValueError, "precisa de casos"):
+            await create_demo_activity(session, turma, "Exemplo", "", [function], "RASCUNHO")
+        self.assertEqual(session.add.call_count, 1)  # Somente o rascunho; a transação chamadora faz rollback.
+        session.add_all.assert_not_called()
+
     async def test_test_environment_is_rejected_before_creating_an_engine(self):
         with patch("backend_v2.seed_demo.make_engine") as make_engine:
             with self.assertRaises(ValueError):
