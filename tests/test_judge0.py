@@ -1,5 +1,6 @@
 import asyncio
 import base64
+from copy import deepcopy
 import unittest
 from unittest.mock import patch
 
@@ -21,7 +22,7 @@ class FakeResponse:
         self._data = data
 
     def json(self):
-        return self._data
+        return deepcopy(self._data)
 
 
 class FakeAsyncClient:
@@ -63,6 +64,29 @@ class Judge0ClientTests(unittest.TestCase):
         self.assertEqual(request["json"]["cpu_time_limit"], 2.0)
         self.assertEqual(request["json"]["memory_limit"], 131_072)
         self.assertEqual(result["stdout"], "result")
+
+    def test_links_math_library_for_c(self):
+        source = (
+            "#include <math.h>\n"
+            "int main(void) { volatile double x = 2.0; return sqrt(x) > 0 ? 0 : 1; }"
+        )
+        for language_id in (None, Judge0Client.C_LANGUAGE_ID):
+            with self.subTest(language_id=language_id):
+                with patch("backend_v2.app.integrations.judge0.httpx.AsyncClient", FakeAsyncClient):
+                    asyncio.run(Judge0Client(settings()).executar_codigo(source, language_id))
+
+                _, request = FakeAsyncClient.posted
+                self.assertEqual(request["json"]["source_code"], source)
+                self.assertEqual(request["json"]["language_id"], Judge0Client.C_LANGUAGE_ID)
+                self.assertEqual(request["json"]["compiler_options"], "-lm")
+
+    def test_does_not_send_c_linker_options_for_other_languages(self):
+        with patch("backend_v2.app.integrations.judge0.httpx.AsyncClient", FakeAsyncClient):
+            asyncio.run(Judge0Client(settings()).executar_codigo("print(1)", language_id=71))
+
+        _, request = FakeAsyncClient.posted
+        self.assertEqual(request["json"]["language_id"], 71)
+        self.assertNotIn("compiler_options", request["json"])
 
     def test_rejected_submission_is_a_technical_failure(self):
         original = FakeAsyncClient.response

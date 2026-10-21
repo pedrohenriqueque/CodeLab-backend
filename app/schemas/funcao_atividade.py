@@ -33,13 +33,16 @@ class CasoTesteAtividadeResponse(ApiSchema):
     peso: Decimal = Decimal("1.00")
 
 
-class FuncaoAtividadeResponse(ApiSchema):
+class FuncaoAtividadeResumoResponse(ApiSchema):
     uuid: UUID
     nome: str
-    enunciado: str
     tipo_retorno: str
     parametros: list[ParametroFuncao]
     dificuldade: str
     nota_maxima: Decimal
     ordem: int
+
+
+class FuncaoAtividadeResponse(FuncaoAtividadeResumoResponse):
+    enunciado: str
     casos_teste: list[CasoTesteAtividadeResponse]

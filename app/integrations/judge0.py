@@ -48,6 +48,8 @@ class Judge0Client:
             "wall_time_limit": self.time_limit_seconds * 2,
             "memory_limit": self.memory_limit_kb,
         }
+        if language_id == self.C_LANGUAGE_ID:
+            payload["compiler_options"] = "-lm"
         try:
             async with httpx.AsyncClient(timeout=self.request_timeout_seconds) as client:
                 response = await client.post(

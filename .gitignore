@@ -6,3 +6,6 @@ __pycache__/
 !.env.example
 instance/
 *.md
+seed_exercise_library.py
+seed_*.py
+tests/test_seed_*.py

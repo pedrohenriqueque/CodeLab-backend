@@ -38,10 +38,11 @@ class ResultadoCasoResponse(ApiSchema):
     visibilidade: str
 
 
-class TentativaHistoricoResponse(ApiSchema):
+class TentativaResumoResponse(ApiSchema):
     uuid: UUID
     funcao_atividade_uuid: UUID
     atividade_uuid: UUID
+    turma_uuid: UUID | None = None
     atividade_titulo: str
     atividade_tipo: str | None = None
     funcao_nome: str
@@ -56,5 +57,9 @@ class TentativaHistoricoResponse(ApiSchema):
     casos_aprovados: int | None = None
     total_casos: int | None = None
     falha_tecnica: bool
+
+
+class TentativaHistoricoResponse(TentativaResumoResponse):
     codigo_fonte: str | None = None
     resultados_casos: list[ResultadoCasoResponse] | None = None
+    parametros: list[dict[str, str]] | None = None

@@ -437,22 +437,21 @@ class SubmissionHistoryTests(unittest.TestCase):
         from contextlib import ExitStack
 
         second = SimpleNamespace(**{**vars(self.attempt), "uuid": uuid4()})
-        self.db.scalars = AsyncMock(return_value=[SimpleNamespace(
-            uuid=self.student.uuid, nome="Ana Souza", matricula="2026001",
-        )])
+        aluno = SimpleNamespace(uuid=self.student.uuid, nome="Ana Souza", matricula="2026001")
         with ExitStack() as stack:
             for context in self._patch_history():
                 stack.enter_context(context)
             stack.enter_context(patch(
-                "backend_v2.app.services.submission_service.SubmissionRepository.list_by_professor",
-                new=AsyncMock(return_value=[self.attempt, second]),
+                "backend_v2.app.services.submission_service.SubmissionRepository.list_summaries",
+                new=AsyncMock(return_value=[(t, self.function, self.activity, aluno, n)
+                                           for n, t in enumerate([self.attempt, second], start=1)]),
             ))
             result = asyncio.run(listar_tentativas(self.teacher, self.db))
 
         self.assertEqual(len(result), 2)
         self.assertTrue(all(item["aluno_nome"] == "Ana Souza" for item in result))
-        self.db.scalars.assert_awaited_once()
         self.db.get.assert_not_awaited()
+        self.assertTrue(all("codigo_fonte" not in item and "resultados_casos" not in item for item in result))
 
     def test_other_teacher_cannot_read_student_identity(self):
         from contextlib import ExitStack
@@ -501,7 +500,7 @@ class ProgressServiceTests(unittest.TestCase):
 
         with patch("backend_v2.app.services.progress_service.obter_atividade", new=AsyncMock(return_value=activity)), \
              patch("backend_v2.app.services.progress_service.ActivityFunctionRepository.list_functions", new=AsyncMock(return_value=[function])), \
-             patch("backend_v2.app.services.progress_service.SubmissionRepository.list_by_student", new=AsyncMock(return_value=[erro_comp, falha_tec])):
+             patch("backend_v2.app.services.progress_service.SubmissionRepository.list_for_student_functions", new=AsyncMock(return_value=[erro_comp, falha_tec])):
             progress = asyncio.run(consultar_progresso(activity_uuid, student, Mock()))
 
         self.assertEqual(len(progress), 1)

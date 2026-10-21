@@ -2,6 +2,8 @@ from datetime import datetime
 from uuid import UUID
 from pydantic import Field, field_validator, model_validator
 from ..core.schemas import ApiSchema
+from .funcao_atividade import FuncaoAtividadeResumoResponse
+from .progresso import ProgressoFuncaoResponse
 
 class CriarAtividadeRequest(ApiSchema):
     turma_uuid: UUID
@@ -47,3 +49,9 @@ class AtividadeResponse(ApiSchema):
     permitir_multiplas_submissoes: bool
     max_tentativas_por_funcao: int | None
     mostrar_ocultos_apos_fechamento: bool
+
+
+class AtividadeResumoResponse(AtividadeResponse):
+    funcoes: list[FuncaoAtividadeResumoResponse]
+    progresso: list[ProgressoFuncaoResponse] | None = None
+    total_submissoes: int | None = None

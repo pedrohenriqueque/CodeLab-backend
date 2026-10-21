@@ -5,7 +5,6 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.exceptions import CodelabException, NotFoundError
@@ -201,8 +200,6 @@ async def consultar_tentativa(
     attempt_id,
     usuario: Usuario,
     db: AsyncSession,
-    *,
-    alunos_por_uuid: dict[UUID, Usuario] | None = None,
 ) -> dict[str, Any]:
     tentativa = await SubmissionRepository(db).get_by_uuid(attempt_id)
     if tentativa is None:
@@ -223,32 +220,10 @@ async def consultar_tentativa(
     else:
         raise CodelabException("Operação não permitida para este perfil.", 403)
 
-    liberar = professor or resultado_liberado(atividade)
-
-    data = {
-        "uuid": tentativa.uuid,
-        "funcao_atividade_uuid": funcao.uuid,
-        "atividade_uuid": atividade.uuid,
-        "atividade_titulo": atividade.titulo,
-        "atividade_tipo": getattr(atividade, "tipo", None),
-        "funcao_nome": funcao.nome,
-        "recebida_em": tentativa.recebida_em,
-        "avaliada_em": getattr(tentativa, "avaliada_em", None),
-        "status": tentativa.status if liberar else "ENVIO_REGISTRADO",
-        "falha_tecnica": tentativa.status == "FALHA_TECNICA",
-        "codigo_fonte": tentativa.codigo_fonte,
-    }
-    if liberar:
-        nota = tentativa.nota
-        if nota is None and tentativa.status == "AVALIADA" and tentativa.total_casos and tentativa.total_casos > 0:
-            nota = (Decimal(tentativa.casos_aprovados) / Decimal(tentativa.total_casos)) * Decimal(funcao.nota_maxima)
-            nota = nota.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        data.update({
-            "nota": nota,
-            "nota_maxima": funcao.nota_maxima,
-            "casos_aprovados": tentativa.casos_aprovados,
-            "total_casos": tentativa.total_casos,
-        })
+    data = resumir_tentativa(tentativa, funcao, atividade, professor=professor)
+    data["codigo_fonte"] = tentativa.codigo_fonte
+    data["parametros"] = getattr(funcao, "parametros", None)
+    if professor or resultado_liberado(atividade):
         resultados = {item.caso_teste_atividade_uuid: item for item in await SubmissionRepository(db).list_case_results(tentativa.uuid)}
         casos = await ActivityFunctionRepository(db).list_cases([funcao.uuid])
         data["resultados_casos"] = []
@@ -266,32 +241,65 @@ async def consultar_tentativa(
                 "visibilidade": caso.visibilidade,
             })
     if professor:
-        aluno = (
-            alunos_por_uuid.get(tentativa.aluno_uuid)
-            if alunos_por_uuid is not None
-            else await db.get(Usuario, tentativa.aluno_uuid)
-        )
+        aluno = await db.get(Usuario, tentativa.aluno_uuid)
         data["aluno_nome"] = aluno.nome if aluno else None
         data["aluno_matricula"] = aluno.matricula if aluno else None
     return data
 
 
-async def listar_tentativas(usuario: Usuario, db: AsyncSession) -> list[dict[str, Any]]:
-    repository = SubmissionRepository(db)
-    alunos_por_uuid = None
+def resumir_tentativa(tentativa, funcao, atividade, *, professor: bool) -> dict[str, Any]:
+    """Projeção comum à lista e ao detalhe, sem consultas ou dados dos casos."""
+    liberar = professor or resultado_liberado(atividade)
+    data = {
+        "uuid": tentativa.uuid,
+        "funcao_atividade_uuid": funcao.uuid,
+        "atividade_uuid": atividade.uuid,
+        "turma_uuid": atividade.turma_uuid,
+        "atividade_titulo": atividade.titulo,
+        "atividade_tipo": getattr(atividade, "tipo", None),
+        "funcao_nome": funcao.nome,
+        "recebida_em": tentativa.recebida_em,
+        "avaliada_em": getattr(tentativa, "avaliada_em", None),
+        "status": tentativa.status if liberar else "ENVIO_REGISTRADO",
+        "falha_tecnica": tentativa.status == "FALHA_TECNICA",
+    }
+    if liberar:
+        nota = tentativa.nota
+        if nota is None and tentativa.status == "AVALIADA" and tentativa.total_casos and tentativa.total_casos > 0:
+            nota = (Decimal(tentativa.casos_aprovados) / Decimal(tentativa.total_casos)) * Decimal(funcao.nota_maxima)
+            nota = nota.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        data.update({
+            "nota": nota,
+            "nota_maxima": funcao.nota_maxima,
+            "casos_aprovados": tentativa.casos_aprovados,
+            "total_casos": tentativa.total_casos,
+        })
+    return data
+
+
+async def listar_tentativas(
+    usuario: Usuario, db: AsyncSession, *, turma_uuid: UUID | None = None,
+    atividade_uuid: UUID | None = None, funcao_uuid: UUID | None = None,
+    aluno_uuid: UUID | None = None, status: str | None = None,
+) -> list[dict[str, Any]]:
     if usuario.perfil == PerfilUsuario.ALUNO:
-        tentativas = await repository.list_by_student(usuario.uuid)
+        scope = {"student_id": usuario.uuid}
     elif usuario.perfil == PerfilUsuario.PROFESSOR:
-        tentativas = await repository.list_by_professor(usuario.uuid)
-        alunos_por_uuid = {}
-        if tentativas:
-            alunos = await db.scalars(
-                select(Usuario).where(Usuario.uuid.in_({tentativa.aluno_uuid for tentativa in tentativas}))
-            )
-            alunos_por_uuid = {aluno.uuid: aluno for aluno in alunos}
+        scope = {"professor_id": usuario.uuid}
     else:
         raise CodelabException("Operação não permitida para este perfil.", 403)
-    return [
-        await consultar_tentativa(tentativa.uuid, usuario, db, alunos_por_uuid=alunos_por_uuid)
-        for tentativa in tentativas
-    ]
+    rows = await SubmissionRepository(db).list_summaries(
+        **scope, class_id=turma_uuid, activity_id=atividade_uuid,
+        function_id=funcao_uuid, filter_student_id=aluno_uuid,
+    )
+    professor = usuario.perfil == PerfilUsuario.PROFESSOR
+    items = []
+    for tentativa, funcao, atividade, aluno, numero in rows:
+        data = resumir_tentativa(tentativa, funcao, atividade, professor=professor)
+        data["tentativa_numero"] = numero
+        if professor:
+            data.update(aluno_nome=aluno.nome, aluno_matricula=aluno.matricula)
+        # Filtrar o status projetado evita revelar o resultado de uma prova aberta.
+        if status is None or data["status"] == status:
+            items.append(data)
+    return items

@@ -2,20 +2,21 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config.database import get_db
 from ..dependencies.authentication import get_current_user
 from ..models.atividade import Atividade
 from ..models.usuario import Usuario
-from ..schemas.atividade import AtividadeResponse, AtualizarAtividadeRequest, CriarAtividadeRequest
+from ..schemas.atividade import AtividadeResponse, AtividadeResumoResponse, AtualizarAtividadeRequest, CriarAtividadeRequest
 from ..schemas.funcao import ParametroFuncao
 from ..schemas.funcao_atividade import (
     AssociarFuncaoAtividadeRequest,
     AtualizarFuncaoAtividadeRequest,
     CasoTesteAtividadeResponse,
     FuncaoAtividadeResponse,
+    FuncaoAtividadeResumoResponse,
     ReordenarFuncoesAtividadeRequest,
 )
 from ..services.activity_service import (
@@ -24,6 +25,7 @@ from ..services.activity_service import (
     atualizar_funcao_interna,
     criar_atividade,
     listar_atividades,
+    listar_resumos_atividades,
     listar_funcoes_internas,
     obter_atividade,
     publicar_atividade,
@@ -85,9 +87,23 @@ def function_out(funcao, casos) -> FuncaoAtividadeResponse:
 
 @router.get("", response_model=list[AtividadeResponse])
 async def list_activities(
-    professor: Usuario = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+    professor: Usuario = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    turma_uuid: UUID | None = Query(default=None, alias="turmaUuid"),
 ) -> list[AtividadeResponse]:
-    return [out(item) for item in await listar_atividades(professor, db)]
+    return [out(item) for item in await listar_atividades(professor, db, turma_uuid)]
+
+
+@router.get("/resumo", response_model=list[AtividadeResumoResponse])
+async def list_activity_summaries(
+    usuario: Usuario = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+    turma_uuid: UUID | None = Query(default=None, alias="turmaUuid"),
+) -> list[AtividadeResumoResponse]:
+    items = await listar_resumos_atividades(usuario, db, turma_uuid)
+    return [AtividadeResumoResponse(
+        **out(item["atividade"]).model_dump(),
+        funcoes=[FuncaoAtividadeResumoResponse.model_validate(f, from_attributes=True) for f in item["funcoes"]],
+        progresso=item["progresso"], total_submissoes=item["total_submissoes"],
+    ) for item in items]
 
 
 @router.post("", response_model=AtividadeResponse, status_code=status.HTTP_201_CREATED)

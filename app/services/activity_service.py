@@ -60,7 +60,7 @@ def aplicar_status_efetivo(atividade: Atividade, agora: datetime | None = None) 
     return atividade
 
 
-async def listar_atividades(usuario: Usuario, db: AsyncSession) -> list[Atividade]:
+async def listar_atividades(usuario: Usuario, db: AsyncSession, turma_uuid: UUID | None = None) -> list[Atividade]:
     turmas = (
         await ClassRepository(db).list_by_professor(usuario.uuid)
         if usuario.perfil == PerfilUsuario.PROFESSOR
@@ -70,11 +70,42 @@ async def listar_atividades(usuario: Usuario, db: AsyncSession) -> list[Atividad
     )
     if turmas is None:
         raise CodelabException("Operação não permitida para este perfil.", 403)
+    if turma_uuid is not None:
+        turmas = [turma for turma in turmas if turma.uuid == turma_uuid]
+        if not turmas:
+            raise CodelabException("Você não tem acesso a esta turma.", 403)
     atividades = await ActivityRepository(db).list_by_class_ids([turma.uuid for turma in turmas])
     lista = atividades if usuario.perfil == PerfilUsuario.PROFESSOR else [item for item in atividades if item.status != "RASCUNHO"]
     for atv in lista:
         aplicar_status_efetivo(atv)
     return lista
+
+
+async def listar_resumos_atividades(usuario: Usuario, db: AsyncSession, turma_uuid: UUID | None = None) -> list[dict]:
+    from collections import defaultdict
+    from ..repositories.submission_repository import SubmissionRepository
+    from .progress_service import calcular_progresso_funcao
+
+    atividades = await listar_atividades(usuario, db, turma_uuid)
+    funcoes = await ActivityFunctionRepository(db).list_summaries([a.uuid for a in atividades])
+    por_atividade = defaultdict(list)
+    for funcao in funcoes:
+        por_atividade[funcao.atividade_uuid].append(funcao)
+    tentativas_por_funcao = defaultdict(list)
+    contagens = {}
+    if usuario.perfil == PerfilUsuario.ALUNO:
+        tentativas = await SubmissionRepository(db).list_for_student_functions(usuario.uuid, [f.uuid for f in funcoes])
+        for tentativa in tentativas:
+            tentativas_por_funcao[tentativa.funcao_atividade_uuid].append(tentativa)
+    else:
+        contagens = await SubmissionRepository(db).count_by_activity_ids([a.uuid for a in atividades])
+    return [{
+        "atividade": atividade,
+        "funcoes": por_atividade[atividade.uuid],
+        "progresso": [calcular_progresso_funcao(f, tentativas_por_funcao[f.uuid], atividade)
+                      for f in por_atividade[atividade.uuid]] if usuario.perfil == PerfilUsuario.ALUNO else None,
+        "total_submissoes": contagens.get(atividade.uuid, 0) if usuario.perfil == PerfilUsuario.PROFESSOR else None,
+    } for atividade in atividades]
 
 
 async def obter_atividade(activity_id: UUID, professor: Usuario, db: AsyncSession) -> Atividade:

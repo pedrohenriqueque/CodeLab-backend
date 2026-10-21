@@ -2,6 +2,7 @@ from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from ..models.funcao_atividade import CasoTesteAtividade, FuncaoAtividade
 
@@ -32,6 +33,19 @@ class ActivityFunctionRepository:
             return []
         result = await self._db.scalars(
             select(CasoTesteAtividade).where(CasoTesteAtividade.funcao_atividade_uuid.in_(activity_function_ids))
+        )
+        return list(result)
+
+    async def list_summaries(self, activity_ids: list[UUID]) -> list[FuncaoAtividade]:
+        if not activity_ids:
+            return []
+        result = await self._db.scalars(
+            select(FuncaoAtividade).where(FuncaoAtividade.atividade_uuid.in_(activity_ids))
+            .options(load_only(
+                FuncaoAtividade.uuid, FuncaoAtividade.atividade_uuid, FuncaoAtividade.nome,
+                FuncaoAtividade.tipo_retorno, FuncaoAtividade.parametros,
+                FuncaoAtividade.dificuldade, FuncaoAtividade.nota_maxima, FuncaoAtividade.ordem,
+            )).order_by(FuncaoAtividade.atividade_uuid, FuncaoAtividade.ordem)
         )
         return list(result)
 
